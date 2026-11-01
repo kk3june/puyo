@@ -221,3 +221,62 @@ kbd { color:#cbd7e7; background:#293149; border-color:#566078; border-bottom-wid
   .game-layout { grid-template-columns:52px minmax(0,1fr); gap:9px; padding:13px 10px; }.stat .score { font-size:17px; }
   .board-overlay .start,.board-overlay .kakao { min-width:150px; }.board-overlay h2 { font-size:22px; }.board-overlay p { font-size:10px; }.player-banner>span:first-child { display:none; }
 }
+
+/* Touch play: thumb-split pad, board gestures, and a board that fits short screens. */
+.playfield canvas { touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+.touch-controls { display:flex; justify-content:space-between; align-items:stretch; gap:16px; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+.touch-controls .pad { display:flex; gap:7px; }
+.touch-controls .move-pad { flex:3; }
+.touch-controls .action-pad { flex:2; }
+.touch-controls button { flex:1; min-width:0; min-height:52px; font-size:20px; touch-action:none; }
+.touch-controls .drop { font-size:11px; line-height:1.25; white-space:normal; }
+.touch-controls .action-pad button { flex:1 1 0; padding:0; }
+.touch-controls .rotate { font-size:26px; color:#0f1a33; background:linear-gradient(#b9fff6,#62d8cf); border-color:#d6fffa; box-shadow:0 3px 0 #1f6f77; }
+.touch-controls .rotate:hover:not(:disabled) { background:linear-gradient(#c9fff8,#74e2d9); }
+.touch-hint { display:none; }
+@media (pointer:coarse) {
+  .touch-hint { display:inline; }
+  .game-footer>.key-hint { display:none; }
+}
+@media(max-width:560px) {
+  .touch-controls { margin:0 12px 14px; gap:12px; }
+  .touch-controls .pad { gap:6px; }
+  .touch-controls button { min-height:58px; }
+  .board-unit { justify-self:center; max-width:max(176px, calc((100vh - 275px) / 2 + 6px)); max-width:max(176px, calc((100svh - 275px) / 2 + 6px)); }
+  .game-footer { gap:4px 10px; }
+  .touch-hint { font-size:9px; }
+}
+
+/* 1:1 versus: your board up front, the opponent smaller on the side. */
+.versus-card { max-width:760px; margin:28px auto 48px; }
+.versus-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,.62fr); gap:22px; padding:22px 26px 18px; align-items:start; }
+.versus-main { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.versus-main .board-unit { width:100%; max-width:320px; justify-self:center; margin:0 auto; }
+.versus-side { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.versus-side .playfield.opponent { width:100%; max-width:200px; border-radius:7px; opacity:.94; }
+.opponent-label, .player-banner strong { font-variant-numeric:tabular-nums; }
+.opponent-label { display:flex; justify-content:space-between; align-items:baseline; color:#b1b6cd; font-size:9px; letter-spacing:1.2px; max-width:200px; }
+.opponent-label strong { color:#fff; font-size:18px; letter-spacing:0; }
+.garbage-meter { min-height:24px; display:flex; flex-wrap:wrap; align-items:center; gap:4px; padding:4px 8px; border-radius:7px; border:1px dashed #4a6d8066; color:#7d86a8; font-size:9px; max-width:320px; }
+.garbage-meter.active { border-style:solid; border-color:#fb648b99; background:#fb648b14; }
+.garbage-meter i { width:11px; height:11px; border-radius:5px 5px 4px 4px; background:linear-gradient(#e6eef0,#8d9da3); }
+.garbage-meter i.row { width:18px; height:18px; border-radius:8px 8px 6px 6px; }
+.garbage-meter b { margin-left:auto; color:#ffb3c6; font-size:13px; }
+.versus-side .garbage-meter { max-width:200px; }
+.net-status { min-height:16px; font-size:10px; color:#8e97b8; }
+.net-status b { color:var(--gold); font-weight:700; }
+.countdown { font-size:88px; line-height:1; color:#fff; text-shadow:0 0 30px #51ffe9aa; font-variant-numeric:tabular-nums; }
+.versus-spinner { display:flex; gap:8px; margin:6px 0 18px; }
+.versus-spinner .blob { animation:versus-bounce .9s ease-in-out infinite; }
+.versus-spinner .blob:nth-child(2) { animation-delay:.18s; }
+@keyframes versus-bounce { 50% { transform:translateY(-9px); } }
+.versus-link { display:inline-block; margin-top:12px; color:#b9fbff; font-size:12px; font-weight:700; text-decoration:underline; text-underline-offset:3px; }
+@media (prefers-reduced-motion:reduce) { .versus-spinner .blob { animation:none; } }
+@media(max-width:560px) {
+  .versus-card { margin:14px 0 28px; }
+  .versus-layout { gap:10px; padding:12px; grid-template-columns:minmax(0,1fr) minmax(0,.5fr); }
+  .versus-main .board-unit { max-width:max(176px, calc((100vh - 300px) / 2 + 6px)); max-width:max(176px, calc((100svh - 300px) / 2 + 6px)); }
+  .garbage-meter { min-height:22px; padding:3px 6px; font-size:8px; }
+  .garbage-meter span { display:none; }
+  .countdown { font-size:64px; }
+}

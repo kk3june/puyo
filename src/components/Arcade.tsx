@@ -4,6 +4,7 @@ import { advance, createGame, MAX_TICKS, RULESET, TICK_MS, type Action, type Gam
 import { GameRenderer, presentation, sampleResolution } from '@/lib/game-renderer';
 import { track } from '@/lib/analytics';
 import { ArcadeEmblem, Crown } from './ArcadeEmblem';
+import { useGameControls } from './useGameControls';
 
 type Result = { token: string | null; ticks: number; moves: Move[]; score: number; maxChain: number; saved?: boolean };
 type Entry = { rank: number; name: string; score: number; max_chain: number };
@@ -71,17 +72,14 @@ export default function Arcade() {
     if (context && renderer.current) renderer.current.draw(context, snapshot, performance.now());
   }, [snapshot, phase]);
   const input = useCallback((action: Action) => {
-    if (engine.current && !engine.current.ended && !engine.current.motion && inputs.current.length < 3) inputs.current.push(action);
+    if (!engine.current || engine.current.ended || engine.current.motion) return false;
+    // A hard drop supersedes queued soft drops (e.g. the start of a flick).
+    if (action === 'drop') inputs.current = inputs.current.filter(queued => queued !== 'down');
+    if (inputs.current.length >= 3) return false;
+    inputs.current.push(action);
+    return true;
   }, []);
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (phase !== 'playing' || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLButtonElement || event.target instanceof HTMLAnchorElement) return;
-      const keys: Record<string, Action> = { ArrowLeft:'left', ArrowRight:'right', ArrowUp:'rotate', ArrowDown:'down', ' ':'drop', x:'rotate', X:'rotate' };
-      if (keys[event.key]) { event.preventDefault(); if (!event.repeat || !['drop','rotate'].includes(keys[event.key])) input(keys[event.key]); }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [phase, input]);
+  const { press, boardPointer } = useGameControls(input, phase === 'playing');
   useEffect(() => {
     if (phase !== 'playing') return;
     let last = performance.now(), accumulator = 0;
@@ -153,7 +151,7 @@ export default function Arcade() {
   const loginButton = (label = '카카오로 로그인') => <form action="/auth/login" method="post" onSubmit={() => track('login_click', { method:'kakao' })}><button className="button kakao" disabled={!authReady || !authLoaded || phase === 'playing'}><span className="chat-icon" />{label}</button></form>;
   return <div className="site-shell">
     <header className="header"><a className="logo" href="/" aria-label="PUYO ROOM 홈"><span className="logo-mark"><Blob color={2} tiny /></span>puyo<span>room</span><span className="logo-dot">✦</span></a>
-      <nav><a href="#how-to">플레이 방법</a><a href="#ranking">랭킹보드</a></nav>
+      <nav><a href="/versus">1:1 대전</a><a href="#how-to">플레이 방법</a><a href="#ranking">랭킹보드</a></nav>
       {user ? <form action="/auth/logout" method="post"><button className="button account" disabled={phase==='playing'}>{user.name} <span>로그아웃</span></button></form> : loginButton()}
     </header>
     <main>
@@ -163,15 +161,15 @@ export default function Arcade() {
         <section className="game-card" aria-label="3분 퍼즐 게임">
           <div className="card-heading"><div><span className="player-chip">1P</span><span className="live-dot" /> SOLO ARCADE</div><span className="mode-badge">3분 스프린트</span></div>
           <div className="game-layout"><aside className="game-stats"><div className="stat score-panel"><span>TOTAL SCORE</span><strong className="score" aria-label="현재 점수">{number(visible.score)}</strong><span className="score-caption">MAKE IT A HIGH SCORE</span></div><div className="stat"><span>BEST CHAIN</span><strong>{snapshot.maxChain}<small> 연쇄</small></strong></div><div className="stat next"><span>NEXT PUYO</span><div><Blob color={snapshot.next[1]} tiny/><Blob color={snapshot.next[0]} tiny/></div></div><div className="room-note"><div className="player-mascot" aria-hidden="true"><span className="mascot-spark">✦</span><Blob color={3}/><b>1P</b></div><strong>YOUR NEXT<br/>GREAT CHAIN.</strong><span className="mascot-caption">다음 연쇄는 더 크게!</span></div></aside>
-            <div className="board-unit"><div className="playfield"><canvas ref={canvas} width={288} height={576} data-motion={phase !== 'playing' ? phase : snapshot.motion ? sampleResolution(snapshot.motion, (snapshot.tick-snapshot.motion.startTick)*TICK_MS)?.step.kind ?? 'falling' : 'falling'} aria-label="6열 12행 게임판. 방향키로 이동 및 회전, 스페이스로 바로 놓기." />
+            <div className="board-unit"><div className="playfield"><canvas ref={canvas} width={288} height={576} data-motion={phase !== 'playing' ? phase : snapshot.motion ? sampleResolution(snapshot.motion, (snapshot.tick-snapshot.motion.startTick)*TICK_MS)?.step.kind ?? 'falling' : 'falling'} aria-label="6열 12행 게임판. 방향키로 이동 및 회전, 스페이스로 바로 놓기. 터치에서는 밀어서 이동, 탭해서 회전, 아래로 튕겨서 바로 놓기." {...boardPointer} />
               {phase !== 'playing' && <div className="board-overlay">
-                {phase === 'idle' ? <><div className="overlay-blobs"><Blob color={1}/><Blob color={4}/></div><span className="overlay-eyebrow">ARE YOU READY?</span><h2>지금, 플레이!</h2><p>네 개를 연결하고<br/>나만의 연쇄를 만들어 보세요.</p><button className="button primary start" onClick={start} disabled={busy}>{busy?'준비 중…':'게임 시작'} <span>▶</span></button><small>FREE PLAY · 로그인 없이 바로 시작</small></> : <><Crown className="result-crown"/><span className="overlay-eyebrow">NICE PLAY!</span><h2>이번 기록</h2><strong className="result-score">{number(result?.score ?? snapshot.score)}</strong><p>최대 {result?.maxChain ?? snapshot.maxChain}연쇄 · 수고했어요!</p>{result?.saved ? <div className="saved">✓ 랭킹 등록 완료</div> : result?.token ? user ? <button className="button kakao" disabled={busy} onClick={submit}>{busy?'검증 중…':'랭킹에 기록 남기기'}</button> : loginButton('로그인하고 기록 남기기') : <small>연습 기록이에요. 랭킹 연결 후 등록할 수 있어요.</small>}<button className="button primary start" onClick={start} disabled={busy}>{busy?'잠시만요…':'한 번 더 플레이'} <span>↻</span></button></>}
+                {phase === 'idle' ? <><div className="overlay-blobs"><Blob color={1}/><Blob color={4}/></div><span className="overlay-eyebrow">ARE YOU READY?</span><h2>지금, 플레이!</h2><p>네 개를 연결하고<br/>나만의 연쇄를 만들어 보세요.</p><button className="button primary start" onClick={start} disabled={busy}>{busy?'준비 중…':'게임 시작'} <span>▶</span></button><small>FREE PLAY · 로그인 없이 바로 시작</small><a className="versus-link" href="/versus">다른 플레이어와 1:1 온라인 대전 →</a></> : <><Crown className="result-crown"/><span className="overlay-eyebrow">NICE PLAY!</span><h2>이번 기록</h2><strong className="result-score">{number(result?.score ?? snapshot.score)}</strong><p>최대 {result?.maxChain ?? snapshot.maxChain}연쇄 · 수고했어요!</p>{result?.saved ? <div className="saved">✓ 랭킹 등록 완료</div> : result?.token ? user ? <button className="button kakao" disabled={busy} onClick={submit}>{busy?'검증 중…':'랭킹에 기록 남기기'}</button> : loginButton('로그인하고 기록 남기기') : <small>연습 기록이에요. 랭킹 연결 후 등록할 수 있어요.</small>}<button className="button primary start" onClick={start} disabled={busy}>{busy?'잠시만요…':'한 번 더 플레이'} <span>↻</span></button></>}
               </div>}
             </div><div className="player-banner"><span>PLAYER 01</span><strong>{user?.name ?? '도전자, 당신!'}</strong><span className="player-star" aria-hidden="true">★</span></div></div>
             <aside className="game-side"><div className={`timer ${remaining<=30?'urgent':''}`}><span>TIME LEFT</span><strong>{String(Math.floor(remaining/60)).padStart(2,'0')}<b>:</b>{String(remaining%60).padStart(2,'0')}</strong><div className="time-track"><i style={{width:`${remaining/180*100}%`}} /></div></div><div className="chain-callout" aria-live="polite">{visible.chain>0 ? <><strong>{visible.chain}</strong><span>CHAIN!</span></> : <><span className="sparkle">✳</span><span>LET’S<br/>CONNECT</span></>}</div><div className="personal-best"><span>이 기기 최고 기록</span><strong>{number(best)}</strong></div></aside>
           </div>
-          <div className="touch-controls" aria-label="게임 조작"><button disabled={phase!=='playing'} onClick={() => input('left')} aria-label="왼쪽 이동">←</button><button disabled={phase!=='playing'} onClick={() => input('right')} aria-label="오른쪽 이동">→</button><button disabled={phase!=='playing'} onClick={() => input('rotate')} aria-label="회전">↻</button><button disabled={phase!=='playing'} onClick={() => input('down')} aria-label="아래로 이동">↓</button><button disabled={phase!=='playing'} onClick={() => input('drop')} className="drop">바로 놓기 ↓</button></div>
-          <div className="game-footer"><span><kbd>←</kbd><kbd>→</kbd> 이동 <kbd>↑</kbd> 회전 <kbd>↓</kbd> 빠르게 <kbd>SPACE</kbd> 바로 놓기</span><span className="connection-dot">{ranked?'랭킹 도전 가능':'연습 모드'}</span></div>
+          <div className="touch-controls" aria-label="게임 조작"><div className="pad move-pad"><button {...press('left')} aria-label="왼쪽 이동">←</button><button {...press('down')} aria-label="아래로 이동">↓</button><button {...press('right')} aria-label="오른쪽 이동">→</button></div><div className="pad action-pad"><button {...press('drop')} className="drop" aria-label="바로 놓기">바로<br/>놓기</button><button {...press('rotate')} className="rotate" aria-label="회전">↻</button></div></div>
+          <div className="game-footer"><span className="touch-hint">보드를 밀어 이동 · 탭 회전 · 아래로 튕겨 바로 놓기</span><span className="key-hint"><kbd>←</kbd><kbd>→</kbd> 이동 <kbd>↑</kbd> 회전 <kbd>↓</kbd> 빠르게 <kbd>SPACE</kbd> 바로 놓기</span><span className="connection-dot">{ranked?'랭킹 도전 가능':'연습 모드'}</span></div>
         </section>
         <aside className="ranking-card" id="ranking"><div className="ranking-title"><div><span className="eyebrow">HALL OF FAME</span><h2>하이스코어 랭킹</h2></div><Crown className="trophy"/></div><div className="ranking-banner"><span>CHASE THE CROWN</span><span aria-hidden="true">✦ ✦ ✦</span></div><div className="tabs" role="group" aria-label="랭킹 기간"><button aria-pressed={period==='all'} className={period==='all'?'selected':''} onClick={() => {setPeriod('all');track('leaderboard_view',{period:'all'});}}>전체 랭킹</button><button aria-pressed={period==='week'} className={period==='week'?'selected':''} onClick={() => {setPeriod('week');track('leaderboard_view',{period:'week'});}}>이번 주</button></div><div className="ranking-columns"><span>순위 / 플레이어</span><span>최고 점수</span></div>
           <div className="ranking-list">{loadingBoard ? <div className="empty-board">기록을 불러오는 중…</div> : leaderboard.entries.length ? leaderboard.entries.map(entry => <div className={`ranking-row rank-${entry.rank}`} key={entry.rank}><span className="rank-number">{String(entry.rank).padStart(2,'0')}</span><span className="player-avatar"><Blob color={(entry.rank%4)+1} tiny /></span><div><strong>{entry.name}</strong><small>최대 {entry.max_chain}연쇄</small></div><b>{number(entry.score)}</b></div>) : <div className="empty-board"><div className="podium" aria-hidden="true"><div><Blob color={2}/><span>2</span></div><div><Crown/><Blob color={4}/><span>1</span></div><div><Blob color={1}/><span>3</span></div></div><strong>{leaderboard.error?'잠시 연결이 끊겼어요':leaderboard.configured?'첫 번째 주인공을 기다려요':'곧, 기록으로 만나요'}</strong><p>{leaderboard.error || (leaderboard.configured?'첫 기록을 남기고 랭킹에 이름을 올려 보세요.':'랭킹 서비스 연결 전이에요. 게임은 지금 바로 즐길 수 있어요.')}</p>{leaderboard.error && <button className="text-button" onClick={fetchBoard}>다시 불러오기</button>}</div>}</div>

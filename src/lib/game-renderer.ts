@@ -52,7 +52,8 @@ export class GameRenderer {
   }
   sync(game: Game, now: number) {
     if (game.tick !== this.lastTick) { this.tickAt = now; this.lastTick = game.tick; }
-    if (game.motion && game.motion.id !== this.seenMotion) {
+    // Netplay rebuilds game objects; compare content so a resimulated motion does not restart.
+    if (game.motion && (game.motion.id !== this.seenMotion || game.motion.ticks !== this.motion?.ticks)) {
       this.motion = game.motion; this.seenMotion = game.motion.id;
       this.motionStart = now - (game.tick - game.motion.startTick) * TICK_MS;
     }

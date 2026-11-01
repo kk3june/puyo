@@ -6,7 +6,10 @@ export const TICK_MS = 50;
 export const MAX_TICKS = 180_000 / TICK_MS;
 export const RULESET = 'sprint-v3';
 export const GARBAGE = 5 as const;
-export type Ruleset = 'sprint-v1' | 'sprint-v2' | 'sprint-v3';
+export type Ruleset = 'sprint-v1' | 'sprint-v2' | 'sprint-v3' | 'battle-v1';
+export const BATTLE_RULESET = 'battle-v1';
+// Versus has no clock; this cap only guarantees a finished replay (a draw).
+export const BATTLE_MAX_TICKS = 600_000 / TICK_MS;
 export type Color = 1 | 2 | 3 | 4;
 export type Garbage = typeof GARBAGE;
 export type FilledCell = Color | Garbage;
@@ -25,8 +28,11 @@ export type Game = {
   tick: number; gravity: number; score: number; maxChain: number;
   lastChain: number; cleared: number; pieces: number; ended: boolean;
   rules: Ruleset; motion: Resolution | null;
-  pieceDropBonus: number;
+  pieceDropBonus: number; garbageRng: number;
 };
+export type LockResult = { chain: number; score: number; allClear: boolean };
+// Battle mode decides how many nuisance Puyos fall after each lock.
+export type LockHook = (result: LockResult) => number;
 const OFFSETS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 const ACTIONS = new Set(['left', 'right', 'rotate', 'down', 'drop']);
 function color(game: { rng: number }): Color {
@@ -48,7 +54,7 @@ export function createGame(seed: number, rules: Ruleset = RULESET): Game {
   const colors = pair(random), next = pair(random);
   return { board: Array.from({ length: HEIGHT }, () => Array<Cell>(WIDTH).fill(0)),
     active: { x: 2, y: 0, rotation: 0, colors }, next, rng: random.rng,
-    tick: 0, gravity: 0, score: 0, maxChain: 0, lastChain: 0, cleared: 0, pieces: 0, ended: false, rules, motion: null, pieceDropBonus: 0 };
+    tick: 0, gravity: 0, score: 0, maxChain: 0, lastChain: 0, cleared: 0, pieces: 0, ended: false, rules, motion: null, pieceDropBonus: 0, garbageRng: nextRandom(random.rng ^ 0x9e3779b9) };
 }
 const copyBoard = (board: Cell[][]) => board.map(row => [...row]);
 export function settle(board: Cell[][], steps?: MotionStep[]) {
@@ -165,7 +171,7 @@ export function placeGarbage(board: Cell[][], requested: number, rng: number, st
   }
   return { placed, overflow, rng: next };
 }
-function lock(game: Game, dropFrom?: Piece) {
+function lock(game: Game, dropFrom?: Piece, onLock?: LockHook) {
   const occupied = cells(game.active);
   if (occupied.some(([, y]) => y < 0)) { game.ended = true; return; }
   const steps: MotionStep[] | undefined = game.rules !== 'sprint-v1' ? [] : undefined;
@@ -181,6 +187,8 @@ function lock(game: Game, dropFrom?: Piece) {
   game.lastChain = result.chain;
   game.cleared += result.cleared;
   game.pieces++;
+  const garbage = onLock?.({ chain: result.chain, score: result.score, allClear: result.chain > 0 && game.board.every(row => row.every(cell => !cell)) }) ?? 0;
+  if (garbage > 0) game.garbageRng = placeGarbage(game.board, garbage, game.garbageRng, steps).rng;
   if (steps) game.motion = {id:game.pieces, startTick:game.tick, steps, ticks:steps.reduce((sum,step)=>sum+step.ticks,0)};
   game.active = { x: 2, y: 0, rotation: 0, colors: game.next };
   game.next = pair(game);
@@ -189,12 +197,13 @@ function lock(game: Game, dropFrom?: Piece) {
   if (!fits(game, game.active)) game.ended = true;
 }
 // Mutates a game once per fixed 50ms tick; max one input per tick.
-export function advance(game: Game, action?: Action) {
+export function advance(game: Game, action?: Action, onLock?: LockHook) {
   if (game.ended) return game;
   game.tick++;
+  const limit = game.rules === BATTLE_RULESET ? BATTLE_MAX_TICKS : MAX_TICKS;
   if (game.motion) {
     if (game.tick - game.motion.startTick < game.motion.ticks) {
-      if (game.tick >= MAX_TICKS) game.ended = true;
+      if (game.tick >= limit) game.ended = true;
       return game;
     }
     game.motion = null;
@@ -210,7 +219,7 @@ export function advance(game: Game, action?: Action) {
   } else if (action === 'drop') {
     const from = {...game.active};
     while (fits(game, { ...game.active, y: game.active.y + 1 })) game.active.y++;
-    lock(game, from);
+    lock(game, from, onLock);
   } else if (action === 'down') {
     if (fits(game, { ...game.active, y: game.active.y + 1 })) {
       game.active.y++;
@@ -218,7 +227,7 @@ export function advance(game: Game, action?: Action) {
         game.score++; game.pieceDropBonus++;
       }
     }
-    else lock(game);
+    else lock(game, undefined, onLock);
   }
   if (!game.ended && action !== 'drop' && !game.motion) {
     game.gravity++;
@@ -226,10 +235,10 @@ export function advance(game: Game, action?: Action) {
     if (game.gravity >= interval) {
       game.gravity = 0;
       if (fits(game, { ...game.active, y: game.active.y + 1 })) game.active.y++;
-      else lock(game);
+      else lock(game, undefined, onLock);
     }
   }
-  if (game.tick >= MAX_TICKS) game.ended = true;
+  if (game.tick >= limit) game.ended = true;
   return game;
 }
 export function ghost(game: Game): Piece {
