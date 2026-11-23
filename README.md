@@ -72,6 +72,8 @@ http://localhost:3000 에서 실행됩니다. 환경변수가 없어도 게임�
 3. **웹 스트림의 Enhanced Measurement(향상된 측정)는 끕니다.** 앱이 직접 `page_view`와 필요한 이벤트만 보내므로 자동 URL/history 측정 및 중복 이벤트를 피합니다. `page_view`에는 쿼리스트링 없는 URL만 전달합니다.
 4. 사용자 동의 후에만 스크립트를 로드합니다. 거절하면 GA 네트워크 요청을 만들지 않습니다. 광고 관련 동의와 Google Signals는 비활성화했습니다.
 5. 이벤트: `page_view`, `game_start`, `game_end`, `login_click`, `login`, `score_submit`, `leaderboard_view`. 점수, 연쇄, 게임 시간, 모드 등만 보내며 계정 ID/이메일/별명을 보내지 않습니다.
+   - 1:1 대전: `versus_search`, `versus_start`(`role`: host/guest), `versus_end`(`outcome`: win/loss/draw, `role`, `score`, `max_chain`, `duration`초, `rtt_ms`), `versus_error`(`reason`, `phase`, `role`). 매치 ID, 시드, 상대 정보는 보내지 않습니다.
+   - `versus_error`의 `reason`: `matchmaking`(매칭 서버 오류), `signaling`(연결 정보 교환 실패), `peer_unreachable`(STUN으로 직접 연결 경로를 찾지 못함), `opponent_left`, `disconnected`, `timeout`. `versus_start`는 연결이 성공한 뒤에 보내므로, 연결 실패율은 `peer_unreachable` ÷ (`versus_start` + `peer_unreachable`)로 봅니다. 이 비율이 높으면 TURN 중계 도입을 검토합니다.
 6. 동의한 실제 브라우저에서 게임 종료 및 기록 저장 후 GA Realtime에서 확인합니다. DebugView는 Tag Assistant 등으로 디버그 모드를 켜고 확인할 수 있습니다.
 
 현재 페이지는 일반 문서 이동 방식으로 렌더링됩니다. 추후 클라이언트 라우팅을 추가하면 route 변경에 대한 page_view를 추가해야 합니다.

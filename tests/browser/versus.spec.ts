@@ -9,6 +9,12 @@ test('two players are matched, connect peer-to-peer, and agree on the winner', a
   const [first, second] = await Promise.all(contexts.map(context => context.newPage()));
   const errors: string[] = [];
   for (const page of [first, second]) page.on('pageerror', error => errors.push(error.message));
+  // Both players consented to analytics; the gtag script is stubbed so events
+  // stay in window.dataLayer and never leave the browser.
+  for (const context of contexts) {
+    await context.addInitScript(() => localStorage.setItem('puyo-analytics', 'granted'));
+    await context.route('https://www.googletagmanager.com/**', route => route.fulfill({ contentType: 'application/javascript', body: '' }));
+  }
   await Promise.all([first.goto('/versus'), second.goto('/versus')]);
 
   await first.getByRole('button', { name: '상대 찾기' }).click();
@@ -27,6 +33,14 @@ test('two players are matched, connect peer-to-peer, and agree on the winner', a
   await expect(first.getByRole('heading', { name: '패배' })).toBeVisible({ timeout: 10_000 });
   await expect(second.getByRole('heading', { name: '승리!' })).toBeVisible({ timeout: 10_000 });
   expect(errors).toEqual([]);
+
+  const events = (page: Page) => page.evaluate(() => (window.dataLayer as ArrayLike<unknown>[]).filter(entry => entry[0] === 'event').map(entry => ({ name: entry[1], ...(entry[2] as object) })));
+  const [mine, theirs] = await Promise.all([events(first), events(second)]);
+  for (const log of [mine, theirs]) expect(log.map(event => event.name)).toEqual(expect.arrayContaining(['versus_search', 'versus_start', 'versus_end']));
+  expect(mine.find(event => event.name === 'versus_end')).toMatchObject({ outcome: 'loss' });
+  expect(theirs.find(event => event.name === 'versus_end')).toMatchObject({ outcome: 'win' });
+  expect(new Set([...mine, ...theirs].filter(event => event.name === 'versus_start').map(event => (event as { role?: string }).role))).toEqual(new Set(['host', 'guest']));
+  expect(JSON.stringify([mine, theirs])).not.toMatch(/matchId|puyo_guest|seed/);
   await Promise.all(contexts.map(context => context.close()));
 });
 

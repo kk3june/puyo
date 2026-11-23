@@ -11,6 +11,8 @@ const POLL_MS = 1000;
 const SIGNAL_POLL_MS = 600;
 const GATHER_MS = 3000;
 const OPEN_MS = 15_000;
+/** ICE found no working route between the peers (no TURN relay to fall back on). */
+export class PeerUnreachable extends Error {}
 
 const wait = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
   if (signal.aborted) return reject(signal.reason);
@@ -94,7 +96,7 @@ export async function connectPeer({ matchId, role }: Matched, signal: AbortSigna
     }
     if (channel.readyState !== 'open') {
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('상대와 직접 연결하지 못했어요. 네트워크를 바꾸거나 다시 시도해 주세요.')), OPEN_MS);
+        const timer = setTimeout(() => reject(new PeerUnreachable('상대와 직접 연결하지 못했어요. 네트워크를 바꾸거나 다시 시도해 주세요.')), OPEN_MS);
         channel.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
         signal.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
       });

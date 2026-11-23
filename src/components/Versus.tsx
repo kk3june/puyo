@@ -3,16 +3,20 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { TICK_MS, type Action } from '@/lib/game';
 import { GameRenderer, presentation } from '@/lib/game-renderer';
 import { catchUp, GuestSession, HostSession, parseMessage, showsProgress, type NetMessage } from '@/lib/netplay';
-import { connectPeer, findMatch } from '@/lib/versus-client';
+import { track } from '@/lib/analytics';
+import { connectPeer, findMatch, PeerUnreachable } from '@/lib/versus-client';
 import { createMatch, pendingGarbage, type Side, type VersusMatch } from '@/lib/versus';
 import { useGameControls } from './useGameControls';
 
 type Phase = 'idle' | 'searching' | 'connecting' | 'countdown' | 'playing' | 'done' | 'error';
 type Status = { view: VersusMatch; rtt: number; stalled: boolean };
+// Why a match never started or ended early; sent to analytics without identity.
+type FailReason = 'matchmaking' | 'signaling' | 'peer_unreachable' | 'opponent_left' | 'disconnected' | 'timeout';
 const COUNTDOWN_MS = 3000;
 const PING_MS = 1000;
 const SILENCE_MS = 10_000;
 const number = (value: number) => value.toLocaleString('ko-KR');
+const roleOf = (side: Side) => side === 0 ? 'host' : 'guest';
 function Blob({ color, tiny = false }: { color: number; tiny?: boolean }) {
   return <span className={`blob color-${color}${tiny ? ' tiny' : ''}`}><i /><i /></span>;
 }
@@ -49,7 +53,10 @@ export default function Versus() {
     channel.current?.close(); peer.current?.close();
     channel.current = null; peer.current = null;
   }, []);
-  const fail = useCallback((message: string) => { teardown(false); setError(message); setPhase('error'); }, [teardown]);
+  const fail = useCallback((message: string, reason: FailReason) => {
+    track('versus_error', { reason, phase: phaseRef.current, role: session.current ? roleOf(session.current.side) : 'none' });
+    teardown(false); setError(message); setPhase('error');
+  }, [teardown]);
 
   useEffect(() => {
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -68,15 +75,18 @@ export default function Versus() {
   async function search() {
     teardown(false);
     const controller = new AbortController(); abort.current = controller;
-    setError(''); setPhase('searching');
+    setError(''); setPhase('searching'); session.current = null;
+    track('versus_search');
+    let stage: FailReason = 'matchmaking';
     try {
       const matched = await findMatch(controller.signal);
-      setPhase('connecting');
+      stage = 'signaling'; setPhase('connecting');
       const connection = await connectPeer(matched, controller.signal);
       peer.current = connection.peer; channel.current = connection.channel;
       const send = (message: NetMessage) => { if (connection.channel.readyState === 'open') connection.channel.send(JSON.stringify(message)); };
       const current = matched.role === 'host' ? new HostSession(matched.seed, send) : new GuestSession(matched.seed, send);
       session.current = current;
+      track('versus_start', { role: matched.role });
       lastHeard.current = performance.now();
       setStatus({ view: current.view, rtt: 0, stalled: false });
       connection.channel.addEventListener('message', event => {
@@ -84,16 +94,16 @@ export default function Versus() {
         if (!message) return;
         if (showsProgress(current.side, message)) lastHeard.current = performance.now();
         if (message.t === 'start') { if (current.side === 1) beginCountdown(); }
-        else if (message.t === 'leave') { if (!['done', 'idle'].includes(phaseRef.current)) fail('상대가 대전을 떠났어요.'); }
+        else if (message.t === 'leave') { if (!['done', 'idle'].includes(phaseRef.current)) fail('상대가 대전을 떠났어요.', 'opponent_left'); }
         else current.receive(message, performance.now());
       });
       connection.channel.addEventListener('close', () => {
-        if (['countdown', 'playing'].includes(phaseRef.current) && !current.view.ended) fail('상대와 연결이 끊겼어요.');
+        if (['countdown', 'playing'].includes(phaseRef.current) && !current.view.ended) fail('상대와 연결이 끊겼어요.', 'disconnected');
       });
       if (current.side === 0) { send({ t: 'start', countdown: COUNTDOWN_MS }); beginCountdown(); }
     } catch (caught) {
       if (controller.signal.aborted) return;
-      fail(caught instanceof Error ? caught.message : '대전을 시작하지 못했어요.');
+      fail(caught instanceof Error ? caught.message : '대전을 시작하지 못했어요.', caught instanceof PeerUnreachable ? 'peer_unreachable' : stage);
     }
   }
   function cancel() { teardown(false); setPhase('idle'); }
@@ -120,7 +130,7 @@ export default function Versus() {
         if (now - lastPing > PING_MS) { lastPing = now; current.ping(now); }
         // The host hears guest pings every second; the guest hears host frames
         // every few ticks. Silence means the peer left or its page is paused.
-        if (!current.view.ended && now - lastHeard.current > SILENCE_MS) { fail('상대의 응답이 없어 대전을 종료했어요.'); return; }
+        if (!current.view.ended && now - lastHeard.current > SILENCE_MS) { fail('상대의 응답이 없어 대전을 종료했어요.', 'timeout'); return; }
       }
       const view = current.view;
       const boards = [mine.current, theirs.current];
@@ -136,6 +146,9 @@ export default function Versus() {
         setStatus({ view, rtt: current.rtt, stalled: current instanceof GuestSession && current.stalled });
       }
       if (view.ended && painters.every(painter => painter.remaining(now) === 0)) {
+        const own = view.games[current.side];
+        track('versus_end', { outcome: view.winner === null ? 'draw' : view.winner === current.side ? 'win' : 'loss', role: roleOf(current.side),
+          max_chain: own.maxChain, score: own.score, duration: Math.round(view.tick * TICK_MS / 1000), rtt_ms: Math.round(current.rtt) });
         setPhase('done'); return;
       }
       frame = requestAnimationFrame(animate);
