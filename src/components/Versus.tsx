@@ -7,6 +7,7 @@ import { track } from '@/lib/analytics';
 import { connectPeer, findMatch, PeerUnreachable } from '@/lib/versus-client';
 import { createMatch, pendingGarbage, type Side, type VersusMatch } from '@/lib/versus';
 import { useGameControls } from './useGameControls';
+import { ControlModeToggle, useControlMode, usePlayViewport } from './ControlMode';
 
 type Phase = 'idle' | 'searching' | 'connecting' | 'countdown' | 'playing' | 'done' | 'error';
 type Status = { view: VersusMatch; rtt: number; stalled: boolean };
@@ -31,6 +32,8 @@ function GarbageMeter({ count, label }: { count: number; label: string }) {
 export default function Versus() {
   const mine = useRef<HTMLCanvasElement>(null);
   const theirs = useRef<HTMLCanvasElement>(null);
+  const card = useRef<HTMLElement>(null);
+  const [controlMode, setControlMode] = useControlMode();
   const renderers = useRef<[GameRenderer, GameRenderer] | null>(null);
   const session = useRef<HostSession | GuestSession | null>(null);
   const channel = useRef<RTCDataChannel | null>(null);
@@ -109,9 +112,10 @@ export default function Versus() {
   function cancel() { teardown(false); setPhase('idle'); }
 
   const input = useCallback((action: Action) => phaseRef.current === 'playing' && !!session.current?.input(action), []);
-  const { press, boardPointer } = useGameControls(input, phase === 'playing');
+  const { press, boardPointer } = useGameControls(input, phase === 'playing', controlMode === 'gesture');
 
   const running = phase === 'countdown' || phase === 'playing';
+  usePlayViewport(card, running);
   useEffect(() => {
     if (!running) return;
     let frame = 0, accumulator = 0, last = 0, lastPing = 0, lastTick = -1;
@@ -176,14 +180,14 @@ export default function Versus() {
       <a className="button account" href="/">← 솔로 모드</a>
     </header>
     <main>
-      <section className="game-card versus-card" data-play={running ? 'on' : undefined} aria-label="1:1 온라인 대전">
-        <div className="card-heading"><div><span className="player-chip">VS</span><span className="live-dot" /> ONLINE 1:1</div><span className="mode-badge">친선전</span></div>
+      <section ref={card} className="game-card versus-card" data-play={running ? 'on' : undefined} data-controls={controlMode} aria-label="1:1 온라인 대전">
+        <div className="card-heading"><div><span className="player-chip">VS</span><span className="live-dot" /> ONLINE 1:1</div><div className="heading-tools"><span className="mode-badge">친선전</span><ControlModeToggle mode={controlMode} onChange={setControlMode} disabled={running} /></div></div>
         <div className="versus-layout" {...boardPointer}>
           <div className="versus-main">
             <GarbageMeter count={pendingGarbage(view, side)} label="내" />
             <div className="board-slot"><div className="board-unit"><div className="playfield"><canvas ref={mine} width={288} height={576} data-phase={phase} aria-label="내 게임판. 방향키로 이동 및 회전, 스페이스로 바로 놓기. 터치에서는 밀어서 이동, 탭해서 회전, 아래로 튕겨서 바로 놓기." />
               {phase !== 'playing' && <div className="board-overlay" role="status">
-                {phase === 'idle' && <><div className="overlay-blobs"><Blob color={1}/><Blob color={2}/></div><span className="overlay-eyebrow">ONLINE BATTLE</span><h2>1:1 대전</h2><p>연쇄로 방해뿌요를 보내<br/>상대를 먼저 쌓이게 하세요.</p><button className="button primary start" onClick={search}>상대 찾기 <span>▶</span></button><small>친선전 · 기록은 저장되지 않아요</small></>}
+                {phase === 'idle' && <><div className="overlay-blobs"><Blob color={1}/><Blob color={2}/></div><span className="overlay-eyebrow">ONLINE BATTLE</span><h2>1:1 대전</h2><p>연쇄로 방해뿌요를 보내<br/>상대를 먼저 쌓이게 하세요.</p><button className="button primary start" onClick={search}>상대 찾기 <span>▶</span></button><small>친선전 · 기록은 저장되지 않아요</small>{controlMode === 'gesture' && <small className="gesture-hint">보드를 밀어 이동 · 탭 회전 · 아래로 튕겨 바로 놓기</small>}</>}
                 {busy && <><span className="overlay-eyebrow">{phase === 'searching' ? 'SEARCHING' : 'CONNECTING'}</span><h2>{phase === 'searching' ? '상대를 찾는 중…' : '연결하는 중…'}</h2><p>{phase === 'searching' ? '다른 플레이어가 들어오면 바로 시작해요.' : '상대 기기와 직접 연결하고 있어요.'}</p><div className="versus-spinner" aria-hidden="true"><Blob color={3} tiny/><Blob color={4} tiny/></div><button className="button start" onClick={cancel}>취소</button></>}
                 {phase === 'countdown' && <><span className="overlay-eyebrow">GET READY</span><strong className="countdown">{countdown}</strong></>}
                 {phase === 'done' && <><span className="overlay-eyebrow">MATCH OVER</span><h2>{outcome}</h2><p>최대 {view.games[side].maxChain}연쇄 · 점수 {number(view.games[side].score)}</p><button className="button primary start" onClick={search}>새 상대 찾기 <span>↻</span></button></>}

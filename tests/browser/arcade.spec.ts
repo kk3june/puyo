@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
 test('guest can play, finish, and recover a pending result without a backend', async ({page}) => {
   const errors:string[]=[]; page.on('pageerror',e=>errors.push(e.message));
   await page.goto('/');
@@ -35,27 +35,74 @@ test('short phones keep the board and controls on one screen',async({page})=>{
   const box=await page.locator('.touch-controls').boundingBox();
   expect(box && box.y+box.height).toBeLessThanOrEqual(667);
 });
-test('board gestures and held buttons drive the piece',async({browser})=>{
-  const context=await browser.newContext({viewport:{width:390,height:844},hasTouch:true,isMobile:true});
+// Touch helpers: a phone-sized touch context with a chosen control mode.
+const phone=async(browser:Browser,mode:'buttons'|'gesture')=>{
+  const context=await browser.newContext({viewport:{width:390,height:664},hasTouch:true,isMobile:true});
+  await context.addInitScript(m=>localStorage.setItem('puyo-controls',m),mode);
   const page=await context.newPage(); await page.goto('/');
+  return {context,page,canvas:page.locator('canvas')};
+};
+const swipeOn=(page:Page,target:Locator)=>async(points:[number,number][],gap=16)=>{
+  await target.dispatchEvent('pointerdown',{pointerId:1,pointerType:'touch',isPrimary:true,clientX:points[0][0],clientY:points[0][1],button:0});
+  for(const [px,py] of points.slice(1)){ await page.waitForTimeout(gap); await target.dispatchEvent('pointermove',{pointerId:1,pointerType:'touch',isPrimary:true,clientX:px,clientY:py}); }
+  const [ex,ey]=points.at(-1)!; await target.dispatchEvent('pointerup',{pointerId:1,pointerType:'touch',isPrimary:true,clientX:ex,clientY:ey,button:0});
+};
+// Bright pixels in a bottom cell mean a landed Puyo; the ghost is dim.
+const filled=(canvas:Locator,column:number)=>canvas.evaluate((el:HTMLCanvasElement,c)=>{const [r,g,b]=el.getContext('2d')!.getImageData(c*48+24,552,1,1).data;return r+g+b>330;},column);
+const layoutOf=(page:Page)=>page.evaluate(()=>{
+  const box=(selector:string)=>{const el=document.querySelector(selector) as HTMLElement|null;if(!el||!el.offsetParent)return null;const r=el.getBoundingClientRect();return [r.left,r.top,r.right,r.bottom].map(v=>Math.round(v)+0);};
+  return {card:box('.game-card'),board:box('.playfield'),pad:box('.touch-controls'),vw:innerWidth,vh:innerHeight};
+});
+
+test('touch layout is the same before and during play, one screen tall and edge to edge',async({browser})=>{
+  for(const mode of ['buttons','gesture'] as const){
+    const {context,page,canvas}=await phone(browser,mode);
+    await page.locator('.game-card').evaluate(el=>scrollTo({top:el.getBoundingClientRect().top+scrollY,behavior:'instant'}));
+    const before=await layoutOf(page);
+    await page.getByRole('button',{name:'게임 시작'}).click();
+    await expect(canvas).toHaveAttribute('data-motion','falling');
+    const during=await layoutOf(page);
+    expect(during,mode).toEqual(before);
+    expect(during.card).toEqual([0,0,during.vw,during.vh]);
+    if(mode==='buttons'){
+      const [left,,right,bottom]=during.pad!;
+      expect([left,right,bottom]).toEqual([0,during.vw,during.vh]);
+      const gaps=await page.evaluate(()=>{const b=[...document.querySelectorAll('.touch-controls button')].map(el=>el.getBoundingClientRect());return b.slice(1).map((r,i)=>Math.round(r.left-b[i].right));});
+      expect(gaps.every(gap=>gap===0)).toBe(true);
+    } else expect(during.pad).toBeNull();
+    await expect(page.getByRole('group',{name:'조작 방식'}).getByRole('button').first()).toBeDisabled();
+    expect(await page.evaluate(()=>{const before=scrollY;scrollBy(0,400);return scrollY-before;})).toBe(0);
+    await context.close();
+  }
+});
+
+test('gesture mode: swipes anywhere above the board area drive the piece',async({browser})=>{
+  const {context,page,canvas}=await phone(browser,'gesture');
   await page.getByRole('button',{name:'게임 시작'}).click();
-  await expect(page.locator('canvas')).toHaveAttribute('data-motion','falling');
-  const canvas=page.locator('canvas'); const rect=(await canvas.boundingBox())!;
-  const cell=rect.width/6, x=rect.x+rect.width/2, y=rect.y+rect.height/3;
-  const swipe=async(points:[number,number][],gap=16)=>{
-    await canvas.dispatchEvent('pointerdown',{pointerId:1,pointerType:'touch',isPrimary:true,clientX:points[0][0],clientY:points[0][1],button:0});
-    for(const [px,py] of points.slice(1)){ await page.waitForTimeout(gap); await canvas.dispatchEvent('pointermove',{pointerId:1,pointerType:'touch',isPrimary:true,clientX:px,clientY:py}); }
-    const [ex,ey]=points.at(-1)!; await canvas.dispatchEvent('pointerup',{pointerId:1,pointerType:'touch',isPrimary:true,clientX:ex,clientY:ey,button:0});
-  };
-  // Bright pixels in a bottom cell mean a landed Puyo; the ghost is dim.
-  const filled=(column:number)=>canvas.evaluate((el:HTMLCanvasElement,c)=>{const [r,g,b]=el.getContext('2d')!.getImageData(c*48+24,552,1,1).data;return r+g+b>330;},column);
-  // Drag two cells left, then flick down to hard drop into column 0.
+  await expect(canvas).toHaveAttribute('data-motion','falling');
+  // Start beside the board, on the stats column: two cells left, then flick down.
+  const stats=page.locator('.game-stats'); const s=(await stats.boundingBox())!, cell=(await canvas.boundingBox())!.width/6;
+  const swipe=swipeOn(page,stats), x=s.x+s.width/2+cell*2.5, y=s.y+s.height/2;
   await swipe([[x,y],[x-cell*0.7,y],[x-cell*1.7,y],[x-cell*2.2,y]]);
   await page.waitForTimeout(250);
   await swipe([[x,y],[x,y+cell*1.5],[x,y+cell*3]],10);
   await expect(canvas).not.toHaveAttribute('data-motion','falling');
   await expect(canvas).toHaveAttribute('data-motion','falling');
-  // Holding a direction repeats it all the way to the wall.
+  await page.waitForTimeout(300);
+  expect([await filled(canvas,0),await filled(canvas,2)]).toEqual([true,false]);
+  await context.close();
+});
+
+test('button mode: held buttons repeat and board swipes are ignored',async({browser})=>{
+  const {context,page,canvas}=await phone(browser,'buttons');
+  await page.getByRole('button',{name:'게임 시작'}).click();
+  await expect(canvas).toHaveAttribute('data-motion','falling');
+  // A flick that would hard drop in gesture mode does nothing here.
+  const r=(await canvas.boundingBox())!, cell=r.width/6, x=r.x+r.width/2, y=r.y+r.height/3;
+  await swipeOn(page,canvas)([[x,y],[x,y+cell*1.5],[x,y+cell*3]],10);
+  await page.waitForTimeout(300);
+  await expect(canvas).toHaveAttribute('data-motion','falling');
+  // Holding a direction repeats it all the way to the wall, then drop.
   const right=page.getByRole('button',{name:'오른쪽 이동'}); const b=(await right.boundingBox())!;
   await right.dispatchEvent('pointerdown',{pointerId:2,pointerType:'touch',isPrimary:true,button:0,clientX:b.x+5,clientY:b.y+5});
   await page.waitForTimeout(600);
@@ -64,46 +111,23 @@ test('board gestures and held buttons drive the piece',async({browser})=>{
   await expect(canvas).not.toHaveAttribute('data-motion','falling');
   await expect(canvas).toHaveAttribute('data-motion','falling');
   await page.waitForTimeout(300);
-  expect([await filled(0),await filled(2),await filled(5)]).toEqual([true,false,true]);
+  expect([await filled(canvas,2),await filled(canvas,5)]).toEqual([false,true]);
   await context.close();
 });
-test('touch play fills the screen, pads touch the edges, and swipes work beside the board',async({browser})=>{
+
+test('the control mode choice is remembered on this device',async({browser})=>{
   const context=await browser.newContext({viewport:{width:390,height:664},hasTouch:true,isMobile:true});
   const page=await context.newPage(); await page.goto('/');
-  await page.getByRole('button',{name:'게임 시작'}).click();
-  const canvas=page.locator('canvas');
-  await expect(canvas).toHaveAttribute('data-motion','falling');
-  const layout=await page.evaluate(()=>{
-    const box=(el:Element)=>el.getBoundingClientRect();
-    const card=box(document.querySelector('.game-card')!), pad=box(document.querySelector('.touch-controls')!), surface=box(document.querySelector('.game-layout')!);
-    const buttons=[...document.querySelectorAll('.touch-controls button')].map(box);
-    const before=scrollY; scrollBy(0,400);
-    return { card:[card.left,card.top,card.right,card.bottom], pad:[pad.left,pad.right,pad.bottom], surfaceBottom:surface.bottom, padTop:pad.top,
-      gaps:buttons.slice(1).map((b,i)=>Math.round(b.left-buttons[i].right)), scrolled:scrollY!==before, vw:innerWidth, vh:innerHeight };
-  });
-  expect(layout.card).toEqual([0,0,layout.vw,layout.vh]);
-  expect(layout.pad).toEqual([0,layout.vw,layout.vh]);
-  expect(layout.surfaceBottom).toBe(layout.padTop);
-  expect(layout.gaps.every(gap=>gap===0)).toBe(true);
-  expect(layout.scrolled).toBe(false);
-  // Swipe on the stats column, outside the canvas: two cells left, then flick down.
-  const stats=page.locator('.game-stats'); const s=(await stats.boundingBox())!, cell=(await canvas.boundingBox())!.width/6;
-  const x=s.x+s.width/2+cell*2.5, y=s.y+s.height/2;
-  const swipe=async(points:[number,number][],gap=16)=>{
-    await stats.dispatchEvent('pointerdown',{pointerId:1,pointerType:'touch',isPrimary:true,clientX:points[0][0],clientY:points[0][1],button:0});
-    for(const [px,py] of points.slice(1)){ await page.waitForTimeout(gap); await stats.dispatchEvent('pointermove',{pointerId:1,pointerType:'touch',isPrimary:true,clientX:px,clientY:py}); }
-    const [ex,ey]=points.at(-1)!; await stats.dispatchEvent('pointerup',{pointerId:1,pointerType:'touch',isPrimary:true,clientX:ex,clientY:ey,button:0});
-  };
-  await swipe([[x,y],[x-cell*0.7,y],[x-cell*1.7,y],[x-cell*2.2,y]]);
-  await page.waitForTimeout(250);
-  await swipe([[x,y],[x,y+cell*1.5],[x,y+cell*3]],10);
-  await expect(canvas).not.toHaveAttribute('data-motion','falling');
-  await expect(canvas).toHaveAttribute('data-motion','falling');
-  await page.waitForTimeout(300);
-  const filled=(column:number)=>canvas.evaluate((el:HTMLCanvasElement,c)=>{const [r,g,b]=el.getContext('2d')!.getImageData(c*48+24,552,1,1).data;return r+g+b>330;},column);
-  expect([await filled(0),await filled(2)]).toEqual([true,false]);
+  const group=page.getByRole('group',{name:'조작 방식'});
+  await expect(group.getByRole('button',{name:'버튼'})).toHaveAttribute('aria-pressed','true');
+  await expect(page.locator('.touch-controls')).toBeVisible();
+  await group.getByRole('button',{name:'제스처'}).click();
+  await expect(page.locator('.touch-controls')).toBeHidden();
+  await page.reload();
+  await expect(page.getByRole('group',{name:'조작 방식'}).getByRole('button',{name:'제스처'})).toHaveAttribute('aria-pressed','true');
   await context.close();
 });
+
 test('score writes are unavailable without backend; start rejects foreign origins',async({request})=>{
   const rejected=await request.post('/api/game/start',{headers:{Origin:'https://foreign.example'}}); expect(rejected.status()).toBe(403);
   const score=await request.post('/api/scores',{headers:{Origin:'http://localhost:3217'},data:{score:999999}}); expect(score.status()).toBe(503);

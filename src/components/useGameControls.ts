@@ -7,8 +7,9 @@ const REPEAT_DELAY_MS = 170;
 const REPEAT_MS = 60;
 const KEYS: Record<string, Action> = { ArrowLeft:'left', ArrowRight:'right', ArrowUp:'rotate', ArrowDown:'down', ' ':'drop', x:'rotate', X:'rotate' };
 
-/** Keyboard, touch-pad buttons and board gestures, all feeding one input queue. */
-export function useGameControls(input: (action: Action) => boolean, enabled: boolean) {
+/** Keyboard, touch-pad buttons and board gestures, all feeding one input queue.
+ *  Gestures only run when the player chose gesture controls. */
+export function useGameControls(input: (action: Action) => boolean, enabled: boolean, gestures = true) {
   const gesture = useRef<BoardGesture | null>(null);
   const repeat = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const stopRepeat = useCallback(() => { clearTimeout(repeat.current); repeat.current = undefined; }, []);
@@ -41,7 +42,7 @@ export function useGameControls(input: (action: Action) => boolean, enabled: boo
   // finger travel is one column of the player's own (first) board.
   const boardPointer = {
     onPointerDown: (event: PointerEvent<HTMLElement>) => {
-      if (!enabled || !event.isPrimary || event.pointerType === 'mouse') return;
+      if (!enabled || !gestures || !event.isPrimary || event.pointerType === 'mouse') return;
       if (event.target instanceof Element && event.target.closest('button, a')) return;
       const board = event.currentTarget instanceof HTMLCanvasElement ? event.currentTarget : event.currentTarget.querySelector('canvas');
       const cell = (board ?? event.currentTarget).getBoundingClientRect().width / WIDTH;

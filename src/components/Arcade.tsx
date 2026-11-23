@@ -5,6 +5,7 @@ import { GameRenderer, presentation, sampleResolution } from '@/lib/game-rendere
 import { track } from '@/lib/analytics';
 import { ArcadeEmblem, Crown } from './ArcadeEmblem';
 import { useGameControls } from './useGameControls';
+import { ControlModeToggle, useControlMode, usePlayViewport } from './ControlMode';
 
 type Result = { token: string | null; ticks: number; moves: Move[]; score: number; maxChain: number; saved?: boolean };
 type Entry = { rank: number; name: string; score: number; max_chain: number };
@@ -17,6 +18,8 @@ function Blob({ color, tiny = false }: { color: number; tiny?: boolean }) {
 }
 export default function Arcade() {
   const canvas = useRef<HTMLCanvasElement>(null);
+  const card = useRef<HTMLElement>(null);
+  const [controlMode, setControlMode] = useControlMode();
   const renderer = useRef<GameRenderer | null>(null);
   const engine = useRef<Game | null>(null);
   const inputs = useRef<Action[]>([]);
@@ -79,7 +82,8 @@ export default function Arcade() {
     inputs.current.push(action);
     return true;
   }, []);
-  const { press, boardPointer } = useGameControls(input, phase === 'playing');
+  const { press, boardPointer } = useGameControls(input, phase === 'playing', controlMode === 'gesture');
+  usePlayViewport(card, phase === 'playing');
   useEffect(() => {
     if (phase !== 'playing') return;
     let last = performance.now(), accumulator = 0;
@@ -158,12 +162,12 @@ export default function Arcade() {
       <section className="intro"><div><div className="eyebrow"><span /> READY. SET. CHAIN!</div><h1>한 번 더,<br className="mobile-break" /> <em>한 연쇄 더!</em></h1><p>나만의 연쇄로, 하이스코어의 주인공이 되어 봐요.</p></div><ArcadeEmblem/><div className="intro-art" aria-hidden="true"><Blob color={4}/><Blob color={1}/><Blob color={2}/><span>LET’S POP!</span></div></section>
       {notice && <div className="notice" role="status">{notice}<button aria-label="안내 닫기" onClick={() => setNotice('')}>×</button></div>}
       <div className="arcade-layout">
-        <section className="game-card" data-play={phase === 'playing' ? 'on' : undefined} aria-label="3분 퍼즐 게임">
-          <div className="card-heading"><div><span className="player-chip">1P</span><span className="live-dot" /> SOLO ARCADE</div><span className="mode-badge">3분 스프린트</span></div>
+        <section ref={card} className="game-card" data-play={phase === 'playing' ? 'on' : undefined} data-controls={controlMode} aria-label="3분 퍼즐 게임">
+          <div className="card-heading"><div><span className="player-chip">1P</span><span className="live-dot" /> SOLO ARCADE</div><div className="heading-tools"><span className="mode-badge">3분 스프린트</span><ControlModeToggle mode={controlMode} onChange={setControlMode} disabled={phase === 'playing'} /></div></div>
           <div className="game-layout" {...boardPointer}><aside className="game-stats"><div className="stat score-panel"><span>TOTAL SCORE</span><strong className="score" aria-label="현재 점수">{number(visible.score)}</strong><span className="score-caption">MAKE IT A HIGH SCORE</span></div><div className="stat"><span>BEST CHAIN</span><strong>{snapshot.maxChain}<small> 연쇄</small></strong></div><div className="stat next"><span>NEXT PUYO</span><div><Blob color={snapshot.next[1]} tiny/><Blob color={snapshot.next[0]} tiny/></div></div><div className="room-note"><div className="player-mascot" aria-hidden="true"><span className="mascot-spark">✦</span><Blob color={3}/><b>1P</b></div><strong>YOUR NEXT<br/>GREAT CHAIN.</strong><span className="mascot-caption">다음 연쇄는 더 크게!</span></div></aside>
             <div className="board-slot"><div className="board-unit"><div className="playfield"><canvas ref={canvas} width={288} height={576} data-motion={phase !== 'playing' ? phase : snapshot.motion ? sampleResolution(snapshot.motion, (snapshot.tick-snapshot.motion.startTick)*TICK_MS)?.step.kind ?? 'falling' : 'falling'} aria-label="6열 12행 게임판. 방향키로 이동 및 회전, 스페이스로 바로 놓기. 터치에서는 밀어서 이동, 탭해서 회전, 아래로 튕겨서 바로 놓기." />
               {phase !== 'playing' && <div className="board-overlay">
-                {phase === 'idle' ? <><div className="overlay-blobs"><Blob color={1}/><Blob color={4}/></div><span className="overlay-eyebrow">ARE YOU READY?</span><h2>지금, 플레이!</h2><p>네 개를 연결하고<br/>나만의 연쇄를 만들어 보세요.</p><button className="button primary start" onClick={start} disabled={busy}>{busy?'준비 중…':'게임 시작'} <span>▶</span></button><small>FREE PLAY · 로그인 없이 바로 시작</small><a className="versus-link" href="/versus">다른 플레이어와 1:1 온라인 대전 →</a></> : <><Crown className="result-crown"/><span className="overlay-eyebrow">NICE PLAY!</span><h2>이번 기록</h2><strong className="result-score">{number(result?.score ?? snapshot.score)}</strong><p>최대 {result?.maxChain ?? snapshot.maxChain}연쇄 · 수고했어요!</p>{result?.saved ? <div className="saved">✓ 랭킹 등록 완료</div> : result?.token ? user ? <button className="button kakao" disabled={busy} onClick={submit}>{busy?'검증 중…':'랭킹에 기록 남기기'}</button> : loginButton('로그인하고 기록 남기기') : <small>연습 기록이에요. 랭킹 연결 후 등록할 수 있어요.</small>}<button className="button primary start" onClick={start} disabled={busy}>{busy?'잠시만요…':'한 번 더 플레이'} <span>↻</span></button></>}
+                {phase === 'idle' ? <><div className="overlay-blobs"><Blob color={1}/><Blob color={4}/></div><span className="overlay-eyebrow">ARE YOU READY?</span><h2>지금, 플레이!</h2><p>네 개를 연결하고<br/>나만의 연쇄를 만들어 보세요.</p><button className="button primary start" onClick={start} disabled={busy}>{busy?'준비 중…':'게임 시작'} <span>▶</span></button><small>FREE PLAY · 로그인 없이 바로 시작</small>{controlMode === 'gesture' && <small className="gesture-hint">보드를 밀어 이동 · 탭 회전 · 아래로 튕겨 바로 놓기</small>}<a className="versus-link" href="/versus">다른 플레이어와 1:1 온라인 대전 →</a></> : <><Crown className="result-crown"/><span className="overlay-eyebrow">NICE PLAY!</span><h2>이번 기록</h2><strong className="result-score">{number(result?.score ?? snapshot.score)}</strong><p>최대 {result?.maxChain ?? snapshot.maxChain}연쇄 · 수고했어요!</p>{result?.saved ? <div className="saved">✓ 랭킹 등록 완료</div> : result?.token ? user ? <button className="button kakao" disabled={busy} onClick={submit}>{busy?'검증 중…':'랭킹에 기록 남기기'}</button> : loginButton('로그인하고 기록 남기기') : <small>연습 기록이에요. 랭킹 연결 후 등록할 수 있어요.</small>}<button className="button primary start" onClick={start} disabled={busy}>{busy?'잠시만요…':'한 번 더 플레이'} <span>↻</span></button></>}
               </div>}
             </div><div className="player-banner"><span>PLAYER 01</span><strong>{user?.name ?? '도전자, 당신!'}</strong><span className="player-star" aria-hidden="true">★</span></div></div></div>
             <aside className="game-side"><div className={`timer ${remaining<=30?'urgent':''}`}><span>TIME LEFT</span><strong>{String(Math.floor(remaining/60)).padStart(2,'0')}<b>:</b>{String(remaining%60).padStart(2,'0')}</strong><div className="time-track"><i style={{width:`${remaining/180*100}%`}} /></div></div><div className="chain-callout" aria-live="polite">{visible.chain>0 ? <><strong>{visible.chain}</strong><span>CHAIN!</span></> : <><span className="sparkle">✳</span><span>LET’S<br/>CONNECT</span></>}</div><div className="personal-best"><span>이 기기 최고 기록</span><strong>{number(best)}</strong></div></aside>
