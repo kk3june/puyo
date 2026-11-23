@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Action } from '../src/lib/game';
-import { GuestSession, HostSession, MAX_AHEAD_TICKS, parseMessage, type NetMessage } from '../src/lib/netplay';
+import { TICK_MS } from '../src/lib/game';
+import { catchUp, GuestSession, HostSession, MAX_AHEAD_TICKS, MAX_CATCH_UP_TICKS, parseMessage, showsProgress, type NetMessage } from '../src/lib/netplay';
 import { replayMatch } from '../src/lib/versus';
 
 // Delivers each JSON-encoded message `latency` ticks after it was sent.
@@ -84,4 +85,28 @@ test('malformed messages are rejected', () => {
   for (const sample of samples) assert.equal(parseMessage(sample), null);
   const ok: NetMessage = { t: 'frame', tick: 3, ack: 1, inputs: [{ tick: 2, side: 1, action: 'drop' }] };
   assert.deepEqual(parseMessage(JSON.stringify(ok)), ok);
+});
+
+test('a guest backlog built while the host was paused is applied, not dropped', () => {
+  const toHost: NetMessage[] = [];
+  const guest = new GuestSession(42, message => toHost.push(message));
+  const host = new HostSession(42, () => {});
+  const moves: Action[] = ['left', 'right'];
+  for (let i = 0; i < MAX_AHEAD_TICKS; i++) { guest.input(moves[i % 2]); guest.step(); }
+  const sent = toHost.filter(message => message.t === 'input').length;
+  assert.ok(sent > 8, `the guest queued ${sent} inputs ahead of the host`);
+  for (const message of toHost) host.receive(message);
+  for (let i = 0; i < MAX_AHEAD_TICKS; i++) host.step();
+  assert.equal(host.log.filter(input => input.side === 1).length, sent);
+});
+
+test('a page resuming after being hidden does not replay the missed time', () => {
+  assert.equal(catchUp(30), 30);
+  assert.equal(catchUp(60_000), MAX_CATCH_UP_TICKS * TICK_MS);
+});
+
+test('a guest only counts host frames as proof the match is alive', () => {
+  assert.equal(showsProgress(1, { t: 'pong', at: 1 }), false, 'a hidden host tab still answers pings');
+  assert.equal(showsProgress(1, { t: 'frame', tick: 4, ack: 0, inputs: [] }), true);
+  assert.equal(showsProgress(0, { t: 'ping', at: 1 }), true);
 });

@@ -5,7 +5,7 @@
 // predicts its own unconfirmed inputs on top, so its controls feel immediate.
 // Opponent inputs only reach the guest board through garbage, which the next
 // host frame corrects.
-import type { Action } from './game';
+import { TICK_MS, type Action } from './game';
 import { advanceMatch, cloneMatch, createMatch, validInput, type VersusInput, type VersusMatch } from './versus';
 
 export type NetMessage =
@@ -19,9 +19,26 @@ export type Send = (message: NetMessage) => void;
 
 export const HEARTBEAT_TICKS = 4;
 export const MAX_AHEAD_TICKS = 40;
+// After the page was hidden (rAF paused) the match resumes instead of
+// simulating the missed time in one burst: a returning host would otherwise
+// auto-drop its own pieces, and a returning guest would run ahead of the host.
+export const MAX_CATCH_UP_TICKS = 5;
 const MAX_QUEUE = 3;
-const MAX_REMOTE_QUEUE = 8;
+// A guest sends at most one input per tick and runs at most MAX_AHEAD_TICKS
+// past the last host frame, so a legitimate backlog always fits.
+const MAX_REMOTE_QUEUE = MAX_AHEAD_TICKS;
 const ACTIONS = new Set(['left', 'right', 'rotate', 'down', 'drop']);
+
+/** Elapsed time still to simulate, capped so a paused page resumes in place. */
+export function catchUp(accumulator: number) {
+  return Math.min(accumulator, MAX_CATCH_UP_TICKS * TICK_MS);
+}
+
+/** Whether a message proves the match is still progressing on the other side. */
+export function showsProgress(side: 0 | 1, message: NetMessage) {
+  // A hidden host tab still answers pings but stops sending frames.
+  return side === 0 || message.t === 'frame' || message.t === 'start';
+}
 
 export function parseMessage(raw: unknown): NetMessage | null {
   if (typeof raw !== 'string' || raw.length > 64_000) return null;

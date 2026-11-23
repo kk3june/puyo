@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { TICK_MS, type Action } from '@/lib/game';
 import { GameRenderer, presentation } from '@/lib/game-renderer';
-import { GuestSession, HostSession, parseMessage, type NetMessage } from '@/lib/netplay';
+import { catchUp, GuestSession, HostSession, parseMessage, showsProgress, type NetMessage } from '@/lib/netplay';
 import { connectPeer, findMatch } from '@/lib/versus-client';
 import { createMatch, pendingGarbage, type Side, type VersusMatch } from '@/lib/versus';
 import { useGameControls } from './useGameControls';
@@ -82,7 +82,7 @@ export default function Versus() {
       connection.channel.addEventListener('message', event => {
         const message = parseMessage(event.data);
         if (!message) return;
-        lastHeard.current = performance.now();
+        if (showsProgress(current.side, message)) lastHeard.current = performance.now();
         if (message.t === 'start') { if (current.side === 1) beginCountdown(); }
         else if (message.t === 'leave') { if (!['done', 'idle'].includes(phaseRef.current)) fail('상대가 대전을 떠났어요.'); }
         else current.receive(message, performance.now());
@@ -115,10 +115,11 @@ export default function Versus() {
         else { setPhase('playing'); last = startAt.current; }
       }
       if (phaseRef.current === 'playing') {
-        accumulator += now - (last || now); last = now;
+        accumulator = catchUp(accumulator + now - (last || now)); last = now;
         while (accumulator >= TICK_MS && !current.view.ended) { accumulator -= TICK_MS; current.step(); }
         if (now - lastPing > PING_MS) { lastPing = now; current.ping(now); }
-        // Pings flow both ways every second, so silence means the peer is gone.
+        // The host hears guest pings every second; the guest hears host frames
+        // every few ticks. Silence means the peer left or its page is paused.
         if (!current.view.ended && now - lastHeard.current > SILENCE_MS) { fail('상대의 응답이 없어 대전을 종료했어요.'); return; }
       }
       const view = current.view;
