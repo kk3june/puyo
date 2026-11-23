@@ -67,6 +67,43 @@ test('board gestures and held buttons drive the piece',async({browser})=>{
   expect([await filled(0),await filled(2),await filled(5)]).toEqual([true,false,true]);
   await context.close();
 });
+test('touch play fills the screen, pads touch the edges, and swipes work beside the board',async({browser})=>{
+  const context=await browser.newContext({viewport:{width:390,height:664},hasTouch:true,isMobile:true});
+  const page=await context.newPage(); await page.goto('/');
+  await page.getByRole('button',{name:'게임 시작'}).click();
+  const canvas=page.locator('canvas');
+  await expect(canvas).toHaveAttribute('data-motion','falling');
+  const layout=await page.evaluate(()=>{
+    const box=(el:Element)=>el.getBoundingClientRect();
+    const card=box(document.querySelector('.game-card')!), pad=box(document.querySelector('.touch-controls')!), surface=box(document.querySelector('.game-layout')!);
+    const buttons=[...document.querySelectorAll('.touch-controls button')].map(box);
+    const before=scrollY; scrollBy(0,400);
+    return { card:[card.left,card.top,card.right,card.bottom], pad:[pad.left,pad.right,pad.bottom], surfaceBottom:surface.bottom, padTop:pad.top,
+      gaps:buttons.slice(1).map((b,i)=>Math.round(b.left-buttons[i].right)), scrolled:scrollY!==before, vw:innerWidth, vh:innerHeight };
+  });
+  expect(layout.card).toEqual([0,0,layout.vw,layout.vh]);
+  expect(layout.pad).toEqual([0,layout.vw,layout.vh]);
+  expect(layout.surfaceBottom).toBe(layout.padTop);
+  expect(layout.gaps.every(gap=>gap===0)).toBe(true);
+  expect(layout.scrolled).toBe(false);
+  // Swipe on the stats column, outside the canvas: two cells left, then flick down.
+  const stats=page.locator('.game-stats'); const s=(await stats.boundingBox())!, cell=(await canvas.boundingBox())!.width/6;
+  const x=s.x+s.width/2+cell*2.5, y=s.y+s.height/2;
+  const swipe=async(points:[number,number][],gap=16)=>{
+    await stats.dispatchEvent('pointerdown',{pointerId:1,pointerType:'touch',isPrimary:true,clientX:points[0][0],clientY:points[0][1],button:0});
+    for(const [px,py] of points.slice(1)){ await page.waitForTimeout(gap); await stats.dispatchEvent('pointermove',{pointerId:1,pointerType:'touch',isPrimary:true,clientX:px,clientY:py}); }
+    const [ex,ey]=points.at(-1)!; await stats.dispatchEvent('pointerup',{pointerId:1,pointerType:'touch',isPrimary:true,clientX:ex,clientY:ey,button:0});
+  };
+  await swipe([[x,y],[x-cell*0.7,y],[x-cell*1.7,y],[x-cell*2.2,y]]);
+  await page.waitForTimeout(250);
+  await swipe([[x,y],[x,y+cell*1.5],[x,y+cell*3]],10);
+  await expect(canvas).not.toHaveAttribute('data-motion','falling');
+  await expect(canvas).toHaveAttribute('data-motion','falling');
+  await page.waitForTimeout(300);
+  const filled=(column:number)=>canvas.evaluate((el:HTMLCanvasElement,c)=>{const [r,g,b]=el.getContext('2d')!.getImageData(c*48+24,552,1,1).data;return r+g+b>330;},column);
+  expect([await filled(0),await filled(2)]).toEqual([true,false]);
+  await context.close();
+});
 test('score writes are unavailable without backend; start rejects foreign origins',async({request})=>{
   const rejected=await request.post('/api/game/start',{headers:{Origin:'https://foreign.example'}}); expect(rejected.status()).toBe(403);
   const score=await request.post('/api/scores',{headers:{Origin:'http://localhost:3217'},data:{score:999999}}); expect(score.status()).toBe(503);

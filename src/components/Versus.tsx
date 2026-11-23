@@ -176,12 +176,12 @@ export default function Versus() {
       <a className="button account" href="/">← 솔로 모드</a>
     </header>
     <main>
-      <section className="game-card versus-card" aria-label="1:1 온라인 대전">
+      <section className="game-card versus-card" data-play={running ? 'on' : undefined} aria-label="1:1 온라인 대전">
         <div className="card-heading"><div><span className="player-chip">VS</span><span className="live-dot" /> ONLINE 1:1</div><span className="mode-badge">친선전</span></div>
-        <div className="versus-layout">
+        <div className="versus-layout" {...boardPointer}>
           <div className="versus-main">
             <GarbageMeter count={pendingGarbage(view, side)} label="내" />
-            <div className="board-unit"><div className="playfield"><canvas ref={mine} width={288} height={576} data-phase={phase} aria-label="내 게임판. 방향키로 이동 및 회전, 스페이스로 바로 놓기. 터치에서는 밀어서 이동, 탭해서 회전, 아래로 튕겨서 바로 놓기." {...boardPointer} />
+            <div className="board-slot"><div className="board-unit"><div className="playfield"><canvas ref={mine} width={288} height={576} data-phase={phase} aria-label="내 게임판. 방향키로 이동 및 회전, 스페이스로 바로 놓기. 터치에서는 밀어서 이동, 탭해서 회전, 아래로 튕겨서 바로 놓기." />
               {phase !== 'playing' && <div className="board-overlay" role="status">
                 {phase === 'idle' && <><div className="overlay-blobs"><Blob color={1}/><Blob color={2}/></div><span className="overlay-eyebrow">ONLINE BATTLE</span><h2>1:1 대전</h2><p>연쇄로 방해뿌요를 보내<br/>상대를 먼저 쌓이게 하세요.</p><button className="button primary start" onClick={search}>상대 찾기 <span>▶</span></button><small>친선전 · 기록은 저장되지 않아요</small></>}
                 {busy && <><span className="overlay-eyebrow">{phase === 'searching' ? 'SEARCHING' : 'CONNECTING'}</span><h2>{phase === 'searching' ? '상대를 찾는 중…' : '연결하는 중…'}</h2><p>{phase === 'searching' ? '다른 플레이어가 들어오면 바로 시작해요.' : '상대 기기와 직접 연결하고 있어요.'}</p><div className="versus-spinner" aria-hidden="true"><Blob color={3} tiny/><Blob color={4} tiny/></div><button className="button start" onClick={cancel}>취소</button></>}
@@ -189,7 +189,7 @@ export default function Versus() {
                 {phase === 'done' && <><span className="overlay-eyebrow">MATCH OVER</span><h2>{outcome}</h2><p>최대 {view.games[side].maxChain}연쇄 · 점수 {number(view.games[side].score)}</p><button className="button primary start" onClick={search}>새 상대 찾기 <span>↻</span></button></>}
                 {phase === 'error' && <><span className="overlay-eyebrow">DISCONNECTED</span><h2>대전 종료</h2><p>{error}</p><button className="button primary start" onClick={search}>다시 찾기 <span>↻</span></button></>}
               </div>}
-            </div><div className="player-banner"><span>YOU</span><strong>{number(me.score)}</strong><span className="player-star" aria-hidden="true">{me.chain > 0 ? `${me.chain} CHAIN` : '★'}</span></div></div>
+            </div><div className="player-banner"><span>YOU</span><strong>{number(me.score)}</strong><span className="player-star" aria-hidden="true">{me.chain > 0 ? `${me.chain} CHAIN` : '★'}</span></div></div></div>
           </div>
           <aside className="versus-side">
             <div className="opponent-label"><span>OPPONENT</span><strong>{number(them.score)}</strong></div>

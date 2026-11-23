@@ -36,14 +36,21 @@ export function useGameControls(input: (action: Action) => boolean, enabled: boo
     onClick: (event: MouseEvent) => { if (event.detail === 0) input(action); },
     disabled: !enabled,
   });
+  // The whole play area is the gesture surface, not just the canvas, so a
+  // swipe that starts beside the board still moves the piece. One cell of
+  // finger travel is one column of the player's own (first) board.
   const boardPointer = {
-    onPointerDown: (event: PointerEvent<HTMLCanvasElement>) => {
+    onPointerDown: (event: PointerEvent<HTMLElement>) => {
       if (!enabled || !event.isPrimary || event.pointerType === 'mouse') return;
+      if (event.target instanceof Element && event.target.closest('button, a')) return;
+      const board = event.currentTarget instanceof HTMLCanvasElement ? event.currentTarget : event.currentTarget.querySelector('canvas');
+      const cell = (board ?? event.currentTarget).getBoundingClientRect().width / WIDTH;
+      if (!(cell > 0)) return;
       event.currentTarget.setPointerCapture(event.pointerId);
-      gesture.current = BoardGesture.start(event.clientX, event.clientY, event.timeStamp, event.currentTarget.getBoundingClientRect().width / WIDTH);
+      gesture.current = BoardGesture.start(event.clientX, event.clientY, event.timeStamp, cell);
     },
-    onPointerMove: (event: PointerEvent<HTMLCanvasElement>) => { if (event.isPrimary) gesture.current?.move(event.clientX, event.clientY, input); },
-    onPointerUp: (event: PointerEvent<HTMLCanvasElement>) => {
+    onPointerMove: (event: PointerEvent<HTMLElement>) => { if (event.isPrimary) gesture.current?.move(event.clientX, event.clientY, input); },
+    onPointerUp: (event: PointerEvent<HTMLElement>) => {
       if (!event.isPrimary) return;
       gesture.current?.end(event.clientX, event.clientY, event.timeStamp, input); gesture.current = null;
     },

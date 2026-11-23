@@ -280,3 +280,39 @@ kbd { color:#cbd7e7; background:#293149; border-color:#566078; border-bottom-wid
   .garbage-meter span { display:none; }
   .countdown { font-size:64px; }
 }
+
+/* Full-screen touch play. While a game runs on a touch device the card covers
+   the whole viewport: no page scroll or pull-to-refresh, every pixel above the
+   pad is a gesture surface, and the pad reaches the screen edges with no gaps. */
+.board-slot { display:contents; }
+@media (hover:none) and (pointer:coarse) {
+  html:has(.game-card[data-play=on]), html:has(.game-card[data-play=on]) body { overflow:hidden; overscroll-behavior:none; }
+  .game-card[data-play=on] { position:fixed; inset:0; z-index:40; margin:0; max-width:none; height:100dvh; display:flex; flex-direction:column; border:0; border-radius:0; box-shadow:none; padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+  .game-card[data-play=on]::before, [data-play=on] .card-heading, [data-play=on] .game-footer { display:none; }
+  [data-play=on] .game-layout, [data-play=on] .versus-layout { flex:1; min-height:0; touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+  [data-play=on] .board-slot { display:flex; justify-content:center; align-items:flex-start; min-width:0; min-height:0; container-type:size; }
+  /* Playfield border 3px each side + 33px banner: fit whichever of width or height runs out first. */
+  [data-play=on] .board-unit { width:min(100cqw, calc((100cqh - 39px) / 2 + 6px)); max-width:none; margin:0; }
+  [data-play=on] .playfield { border-width:3px; }
+  [data-play=on] .player-banner { height:33px; border-width:2px; }
+
+  [data-play=on] .game-layout { display:grid; grid-template-columns:62px minmax(0,1fr); grid-template-rows:auto minmax(0,1fr); gap:8px 10px; padding:10px 12px 8px; }
+  [data-play=on] .game-side { grid-column:1/-1; grid-row:1; flex-direction:row; align-items:center; justify-content:space-between; padding:0; gap:10px; }
+  [data-play=on] .game-stats { grid-row:2; padding-top:0; }
+  [data-play=on] .board-slot { grid-row:2; }
+  /* Compact HUD at any width: drop the wide-screen decorations while playing. */
+  [data-play=on] .room-note, [data-play=on] .time-track { display:none; }
+  [data-play=on] .timer { display:flex; align-items:center; gap:7px; border:0; background:none; padding:0; box-shadow:none; }
+  [data-play=on] .timer>span { margin:0; }
+  [data-play=on] .chain-callout { display:flex; align-items:center; gap:5px; margin:0; padding:0; border:0; background:none; box-shadow:none; transform:none; }
+  [data-play=on] .personal-best { margin:0; padding:0; border:0; text-align:right; }
+
+  [data-play=on] .versus-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,.45fr); grid-template-rows:minmax(0,1fr); align-items:stretch; gap:10px; padding:10px 12px 8px; }
+  [data-play=on] .versus-main { min-height:0; }
+  [data-play=on] .versus-main .board-slot { flex:1; }
+
+  [data-play=on] .touch-controls { flex:none; margin:0; gap:0; padding:0 0 env(safe-area-inset-bottom); background:#0b0e26; border-top:1px solid #647899; }
+  [data-play=on] .touch-controls .pad { gap:0; }
+  [data-play=on] .touch-controls button { height:clamp(76px, 13dvh, 120px); min-height:0; border-radius:0; border-width:0 1px 0 0; border-color:#ffffff1c; box-shadow:none; }
+  [data-play=on] .touch-controls .pad:last-child button:last-child { border-right:0; }
+}
