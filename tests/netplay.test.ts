@@ -81,10 +81,11 @@ test('the guest never shows a predicted win or loss', () => {
 });
 
 test('malformed messages are rejected', () => {
-  const samples: unknown[] = ['{', JSON.stringify({ t: 'input', seq: 1, tick: 1, action: 'jump' }), JSON.stringify({ t: 'frame', tick: 1, ack: 0, inputs: [{ tick: 1, side: 3, action: 'left' }] }), 42, JSON.stringify({ t: 'nope' })];
+  const samples: unknown[] = ['{', JSON.stringify({ t: 'input', seq: 1, tick: 1, action: 'jump' }), JSON.stringify({ t: 'frame', tick: 1, ack: 0, inputs: [{ tick: 1, side: 3, action: 'left' }] }), 42, JSON.stringify({ t: 'nope' }), JSON.stringify({ t: 'start', countdown: 3000 }), JSON.stringify({ t: 'start', countdown: 3000, seed: 0 }), JSON.stringify({ t: 'start', countdown: 3000, seed: 2 ** 32 })];
   for (const sample of samples) assert.equal(parseMessage(sample), null);
   const ok: NetMessage = { t: 'frame', tick: 3, ack: 1, inputs: [{ tick: 2, side: 1, action: 'drop' }] };
   assert.deepEqual(parseMessage(JSON.stringify(ok)), ok);
+  for (const good of [{ t: 'start', countdown: 3000, seed: 7 }, { t: 'rematch' }] as NetMessage[]) assert.deepEqual(parseMessage(JSON.stringify(good)), good);
 });
 
 test('a guest backlog built while the host was paused is applied, not dropped', () => {

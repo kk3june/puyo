@@ -9,7 +9,9 @@ import { TICK_MS, type Action } from './game';
 import { advanceMatch, cloneMatch, createMatch, validInput, type VersusInput, type VersusMatch } from './versus';
 
 export type NetMessage =
-  | { t: 'start'; countdown: number }
+  // The host starts every game, first and rematch, with the seed both boards use.
+  | { t: 'start'; countdown: number; seed: number }
+  | { t: 'rematch' }
   | { t: 'input'; seq: number; tick: number; action: Action }
   | { t: 'frame'; tick: number; ack: number; inputs: VersusInput[] }
   | { t: 'ping'; at: number }
@@ -45,7 +47,8 @@ export function parseMessage(raw: unknown): NetMessage | null {
   try {
     const message = JSON.parse(raw) as NetMessage;
     switch (message?.t) {
-      case 'start': return Number.isFinite(message.countdown) ? message : null;
+      case 'start': return Number.isFinite(message.countdown) && Number.isInteger(message.seed) && message.seed >= 1 && message.seed <= 0xffffffff ? message : null;
+      case 'rematch': return message;
       case 'input': return Number.isInteger(message.seq) && Number.isInteger(message.tick) && ACTIONS.has(message.action) ? message : null;
       case 'frame': return Number.isInteger(message.tick) && Number.isInteger(message.ack) && Array.isArray(message.inputs) && message.inputs.every(validInput) ? message : null;
       case 'ping': case 'pong': return Number.isFinite(message.at) ? message : null;

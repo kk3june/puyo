@@ -272,6 +272,29 @@ kbd { color:#cbd7e7; background:#293149; border-color:#566078; border-bottom-wid
 @keyframes versus-bounce { 50% { transform:translateY(-9px); } }
 .versus-link { display:inline-block; margin-top:12px; color:#b9fbff; font-size:12px; font-weight:700; text-decoration:underline; text-underline-offset:3px; }
 @media (prefers-reduced-motion:reduce) { .versus-spinner .blob { animation:none; } }
+/* Friend invites and rematch. */
+.board-overlay .start + .start { margin-top:8px; }
+.invite-code { font-family:'Manrope',var(--font); font-size:34px; font-weight:800; letter-spacing:6px; color:#fff; margin:6px 0 12px; padding:6px 14px; border:2px dashed #62d8cf88; border-radius:10px; font-variant-numeric:tabular-nums; user-select:all; -webkit-user-select:all; }
+.invite-inline { color:#fff; letter-spacing:2px; }
+.overlay-actions { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
+.overlay-actions .button { min-width:110px; }
+.board-overlay .overlay-link { color:#b9fbff; margin-top:10px; font-size:12px; }
+.rematch-note { color:var(--gold) !important; font-weight:700; }
+.overlay-actions .button { flex:1 1 0; min-width:0; }
+/* Overlays shrink with the board so every button stays reachable on small phones. */
+.board-overlay { container-type:size; }
+@container (max-height: 470px) {
+  .board-overlay .overlay-blobs { display:none; }
+  .board-overlay h2 { font-size:19px; margin:6px 0 4px; }
+  .board-overlay p { font-size:11px; line-height:1.6; margin:2px 0 10px; }
+  .board-overlay .start { min-width:0; width:100%; min-height:40px; padding:9px 14px; margin-top:4px; font-size:12px; }
+  .board-overlay .start + .start { margin-top:6px; }
+  .board-overlay small { margin-top:8px; font-size:9px; line-height:1.6; }
+  .board-overlay .overlay-actions { width:100%; }
+  .board-overlay .overlay-actions .button { min-height:38px; padding:8px 6px; font-size:12px; }
+  .invite-code { font-size:24px; letter-spacing:3px; margin:2px 0 8px; padding:4px 8px; }
+}
+
 @media(max-width:560px) {
   .versus-card { margin:14px 0 28px; }
   .versus-layout { gap:10px; padding:12px; grid-template-columns:minmax(0,1fr) minmax(0,.5fr); }

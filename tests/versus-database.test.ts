@@ -47,3 +47,42 @@ test('matchmaking pairs two players and relays signals only within the match', a
     await assert.rejects(() => db.query(`select versus_enqueue('eve', 1)`), /permission denied/);
   } finally { await db.close(); }
 });
+
+test('friend invites pair exactly one friend and stay out of random matchmaking', async () => {
+  const db = new PGlite();
+  try {
+    await db.exec('create role anon; create role authenticated; create role service_role bypassrls;');
+    for (const file of ['202611020001_versus_matchmaking.sql', '202611240001_versus_invites.sql'])
+      await db.exec(await readFile(new URL(`../supabase/migrations/${file}`, import.meta.url), 'utf8'));
+    const call = async <T>(sql: string, params: unknown[] = []) => (await db.query<{ r: T }>(`select ${sql} as r`, params)).rows[0].r;
+    await db.exec('set role service_role');
+
+    const invite = await call<Entry & { invite: string }>('versus_create_invite($1, $2)', ['alice', 'ABC234']);
+    assert.deepEqual([invite.status, invite.invite], ['waiting', 'ABC234']);
+    await assert.rejects(() => call('versus_create_invite($1, $2)', ['bob', 'ABC234']), /duplicate key/, 'codes are unique');
+    await assert.rejects(() => call('versus_create_invite($1, $2)', ['bob', 'abc1o0']), /check constraint/, 'look-alike characters are rejected');
+    assert.equal((await call<Entry>('versus_enqueue($1, $2)', ['stranger', 5])).status, 'waiting', 'a stranger never lands in an invite');
+    await assert.rejects(() => call('versus_join_invite($1, $2, $3)', ['alice', 'ABC234', 7]), /own invite/);
+
+    const friend = await call<Entry>('versus_join_invite($1, $2, $3)', ['bob', 'ABC234', 7]);
+    assert.deepEqual([friend.status, friend.role, friend.seed], ['matched', 'guest', 7]);
+    const host = await call<Entry>('versus_poll($1, $2)', [invite.id, 'alice']);
+    assert.deepEqual([host.status, host.role, host.matchId], ['matched', 'host', friend.matchId]);
+    await assert.rejects(() => call('versus_join_invite($1, $2, $3)', ['carol', 'ABC234', 8]), /invite not found/, 'only one friend can join');
+
+    await call('versus_post_signal($1, $2, $3)', [friend.matchId, 'alice', JSON.stringify({ type: 'offer', sdp: 'x' })]);
+    assert.equal((await call<unknown[]>('versus_read_signals($1, $2, 0)', [friend.matchId, 'bob'])).length, 1, 'signaling works for invited matches');
+
+    // The host may be away sharing the link: an invite outlives the 8s random-queue window.
+    const away = await call<Entry>('versus_create_invite($1, $2)', ['dave', 'XYZ789']);
+    await db.exec(`update versus_queue set seen_at = now() - interval '5 minutes' where id = '${away.id}'`);
+    assert.equal((await call<Entry>('versus_join_invite($1, $2, $3)', ['erin', 'XYZ789', 9])).status, 'matched');
+    const stale = await call<Entry>('versus_create_invite($1, $2)', ['frank', 'QRS456']);
+    await db.exec(`update versus_queue set seen_at = now() - interval '11 minutes' where id = '${stale.id}'`);
+    await assert.rejects(() => call('versus_join_invite($1, $2, $3)', ['gina', 'QRS456', 10]), /invite not found/, 'invites expire');
+
+    await db.exec('reset role; set role anon');
+    await assert.rejects(() => db.query(`select versus_create_invite('eve', 'EVE234')`), /permission denied/);
+    await assert.rejects(() => db.query(`select versus_join_invite('eve', 'ABC234', 1)`), /permission denied/);
+  } finally { await db.close(); }
+});

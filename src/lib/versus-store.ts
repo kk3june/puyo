@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 import { database } from './supabase/server';
 
 export type Role = 'host' | 'guest';
-export type QueueEntry = { id: string; status: 'waiting' | 'matched'; matchId: string | null; role: Role | null; seed: number | null };
+export type QueueEntry = { id: string; status: 'waiting' | 'matched'; matchId: string | null; role: Role | null; seed: number | null; invite?: string | null };
 export type Signal = { id: number; payload: unknown };
 export interface VersusStore {
   enqueue(player: string, seed: number): Promise<QueueEntry>;
@@ -12,10 +12,16 @@ export interface VersusStore {
   cancel(id: string, player: string): Promise<void>;
   postSignal(matchId: string, player: string, payload: unknown): Promise<void>;
   readSignals(matchId: string, player: string, after: number): Promise<Signal[]>;
+  /** Opens a friend invite; throws InviteTaken if the code is in use. */
+  createInvite(player: string, code: string): Promise<QueueEntry>;
+  joinInvite(player: string, code: string, seed: number): Promise<QueueEntry>;
 }
 export class VersusError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
+export class InviteTaken extends Error {}
+const INVITE_GONE = new VersusError('초대가 만료됐거나 이미 다른 사람이 들어갔어요. 친구에게 새 링크를 받아 주세요.', 404);
+const OWN_INVITE = new VersusError('내가 만든 초대 링크예요. 친구에게 보내 주세요.', 409);
 
 const supabaseConfigured = () => !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 
@@ -24,6 +30,9 @@ async function rpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
   if (error) {
     if (error.code === '42501') throw new VersusError('대전 참가자가 아닙니다.', 403);
     if (error.code === '54000') throw new VersusError('연결 요청이 너무 많습니다.', 429);
+    if (error.code === 'P0002') throw INVITE_GONE;
+    if (error.code === '22023') throw OWN_INVITE;
+    if (error.code === '23505') throw new InviteTaken();
     throw new VersusError('매칭 서버에 연결하지 못했어요.', 502);
   }
   return data as T;
@@ -35,14 +44,20 @@ const supabaseStore: VersusStore = {
   cancel: (id, player) => rpc('versus_cancel', { p_id: id, p_player: player }),
   postSignal: (matchId, player, payload) => rpc('versus_post_signal', { p_match: matchId, p_player: player, p_payload: payload }),
   readSignals: (matchId, player, after) => rpc('versus_read_signals', { p_match: matchId, p_player: player, p_after: after }),
+  createInvite: (player, code) => rpc('versus_create_invite', { p_player: player, p_code: code }),
+  joinInvite: (player, code, seed) => rpc('versus_join_invite', { p_player: player, p_code: code, p_seed: seed }),
 };
 
 // Single-process fallback for local development without Supabase. It mirrors
 // the SQL functions in supabase/migrations/202611020001_versus_matchmaking.sql.
-type MemoryRow = { id: string; player: string; created: number; seen: number; matchId: string | null; role: Role | null; seed: number | null };
+type MemoryRow = { id: string; player: string; created: number; seen: number; matchId: string | null; role: Role | null; seed: number | null; invite: string | null };
 type MemoryState = { queue: MemoryRow[]; signals: { id: number; matchId: string; sender: Role; payload: unknown; created: number }[]; nextSignal: number };
 const memory: MemoryState = ((globalThis as { __puyoVersus?: MemoryState }).__puyoVersus ??= { queue: [], signals: [], nextSignal: 1 });
 const entry = (row: MemoryRow): QueueEntry => ({ id: row.id, status: row.matchId ? 'matched' : 'waiting', matchId: row.matchId, role: row.role, seed: row.seed });
+const sweep = (player: string, now: number) => {
+  memory.queue = memory.queue.filter(row => row.seen >= now - 600_000 && !(row.player === player && !row.matchId));
+  memory.signals = memory.signals.filter(signal => signal.created >= now - 600_000);
+};
 function memberRole(matchId: string, player: string) {
   const role = memory.queue.find(row => row.matchId === matchId && row.player === player)?.role;
   if (!role) throw new VersusError('대전 참가자가 아닙니다.', 403);
@@ -51,10 +66,9 @@ function memberRole(matchId: string, player: string) {
 const memoryStore: VersusStore = {
   async enqueue(player, seed) {
     const now = Date.now();
-    memory.queue = memory.queue.filter(row => row.seen >= now - 600_000 && !(row.player === player && !row.matchId));
-    memory.signals = memory.signals.filter(signal => signal.created >= now - 600_000);
-    const other = memory.queue.find(row => !row.matchId && row.player !== player && row.seen > now - 8_000);
-    const mine: MemoryRow = { id: randomUUID(), player, created: now, seen: now, matchId: null, role: null, seed: null };
+    sweep(player, now);
+    const other = memory.queue.find(row => !row.matchId && !row.invite && row.player !== player && row.seen > now - 8_000);
+    const mine: MemoryRow = { id: randomUUID(), player, created: now, seen: now, matchId: null, role: null, seed: null, invite: null };
     if (other) {
       const matchId = randomUUID();
       Object.assign(other, { matchId, role: 'host', seed });
@@ -80,6 +94,25 @@ const memoryStore: VersusStore = {
   async readSignals(matchId, player, after) {
     const role = memberRole(matchId, player);
     return memory.signals.filter(signal => signal.matchId === matchId && signal.sender !== role && signal.id > after).map(({ id, payload }) => ({ id, payload }));
+  },
+  async createInvite(player, code) {
+    const now = Date.now();
+    sweep(player, now);
+    if (memory.queue.some(row => row.invite === code)) throw new InviteTaken();
+    const mine: MemoryRow = { id: randomUUID(), player, created: now, seen: now, matchId: null, role: null, seed: null, invite: code };
+    memory.queue.push(mine);
+    return { ...entry(mine), invite: code };
+  },
+  async joinInvite(player, code, seed) {
+    const now = Date.now();
+    const other = memory.queue.find(row => row.invite === code && !row.matchId && row.seen >= now - 600_000);
+    if (!other) throw INVITE_GONE;
+    if (other.player === player) throw OWN_INVITE;
+    const matchId = randomUUID();
+    Object.assign(other, { matchId, role: 'host', seed });
+    const mine: MemoryRow = { id: randomUUID(), player, created: now, seen: now, matchId, role: 'guest', seed, invite: null };
+    memory.queue.push(mine);
+    return entry(mine);
   },
 };
 

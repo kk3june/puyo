@@ -1,5 +1,5 @@
 export type AnalyticsEvent = 'game_start' | 'game_end' | 'login' | 'login_click' | 'score_submit' | 'leaderboard_view'
-  | 'versus_search' | 'versus_start' | 'versus_end' | 'versus_error';
+  | 'versus_search' | 'versus_start' | 'versus_end' | 'versus_error' | 'versus_invite' | 'versus_rematch';
 declare global {
   interface Window { dataLayer: unknown[]; gtag?: (...args: unknown[]) => void; }
 }

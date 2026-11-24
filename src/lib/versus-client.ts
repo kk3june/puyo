@@ -28,9 +28,10 @@ async function request<T>(url: string, init: RequestInit, signal: AbortSignal): 
   return data as T;
 }
 
-/** Joins the queue and resolves once paired; aborting leaves the queue. */
-export async function findMatch(signal: AbortSignal): Promise<Matched> {
-  let entry = await request<Entry>('/api/versus/queue', { method: 'POST' }, signal);
+type Ticket = Entry & { invite?: string | null };
+
+/** Polls a queue ticket until it is paired; aborting withdraws it. */
+async function waitMatched(entry: Entry, signal: AbortSignal): Promise<Matched> {
   try {
     while (entry.status !== 'matched') {
       await wait(POLL_MS, signal);
@@ -40,6 +41,27 @@ export async function findMatch(signal: AbortSignal): Promise<Matched> {
     if (signal.aborted) void fetch(`/api/versus/queue?id=${entry.id}`, { method: 'DELETE', keepalive: true });
     throw error;
   }
+  return { matchId: entry.matchId!, role: entry.role!, seed: entry.seed! };
+}
+
+/** Joins the random queue and resolves once paired; aborting leaves the queue. */
+export async function findMatch(signal: AbortSignal): Promise<Matched> {
+  return waitMatched(await request<Entry>('/api/versus/queue', { method: 'POST' }, signal), signal);
+}
+
+const postInvite = <T>(body: object, signal: AbortSignal) => request<T>('/api/versus/invite', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+}, signal);
+
+/** Opens a friend invite. `ready` resolves once the friend joins; aborting withdraws it. */
+export async function createInvite(signal: AbortSignal) {
+  const ticket = await postInvite<Ticket>({}, signal);
+  return { code: ticket.invite!, ready: waitMatched(ticket, signal) };
+}
+
+/** Joins a friend's invite as the guest. */
+export async function joinInvite(code: string, signal: AbortSignal): Promise<Matched> {
+  const entry = await postInvite<Entry>({ code }, signal);
   return { matchId: entry.matchId!, role: entry.role!, seed: entry.seed! };
 }
 
