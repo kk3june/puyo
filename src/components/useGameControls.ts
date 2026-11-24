@@ -50,7 +50,7 @@ export function useGameControls(input: (action: Action) => boolean, enabled: boo
       event.currentTarget.setPointerCapture(event.pointerId);
       gesture.current = BoardGesture.start(event.clientX, event.clientY, event.timeStamp, cell);
     },
-    onPointerMove: (event: PointerEvent<HTMLElement>) => { if (event.isPrimary) gesture.current?.move(event.clientX, event.clientY, input); },
+    onPointerMove: (event: PointerEvent<HTMLElement>) => { if (event.isPrimary) gesture.current?.move(event.clientX, event.clientY, event.timeStamp, input); },
     onPointerUp: (event: PointerEvent<HTMLElement>) => {
       if (!event.isPrimary) return;
       gesture.current?.end(event.clientX, event.clientY, event.timeStamp, input); gesture.current = null;
