@@ -45,13 +45,14 @@ http://localhost:3000 에서 실행됩니다. 환경변수가 없어도 게임�
 
 ## 1:1 온라인 대전 (`/versus`)
 
-비용 없이 운영하기 위해 대전은 브라우저끼리 직접 연결하는 P2P 방식입니다. 서버는 두 플레이어를 짝짓고 WebRTC 연결 정보(offer, answer 각 1개)만 중계합니다. 이후 게임 데이터는 서버를 거치지 않습니다.
+비용 없이 운영하기 위해 대전은 브라우저끼리 직접 연결하는 P2P 방식입니다. 서버는 두 플레이어를 짝짓고 WebRTC 연결 정보(offer, answer 각 1개)만 중계합니다. 이후 게임 데이터는 앱 서버를 거치지 않습니다. 직접 경로가 없을 때만 Cloudflare TURN 중계를 거칩니다.
 
 - **판정**: 먼저 대기한 플레이어가 호스트가 됩니다. 호스트 브라우저가 두 보드를 하나의 결정론적 시뮬레이션(`src/lib/versus.ts`, 규칙 `battle-v1`)으로 진행하며 공격, 상쇄, 방해뿌요 낙하를 판정합니다. 두 플레이어는 같은 뿌요 순서를 받습니다. 시간 제한은 없고 먼저 쌓여 막히는 쪽이 집니다. 같은 틱에 둘 다 막히면 무승부입니다.
 - **친구 초대**: '친구 초대'를 누르면 6자리 코드와 링크(`/versus?invite=CODE`)가 만들어집니다. 휴대폰에서는 공유 시트로 보내고, 데스크톱에서는 링크를 복사합니다. 코드에는 헷갈리는 글자(0/O, 1/I)가 없습니다. 링크로 들어온 친구 한 명만 참가할 수 있고, 초대는 랜덤 매칭에 섞이지 않습니다. 초대한 사람이 링크를 공유하러 다른 앱에 가 있어도(페이지가 멈춰도) 10분 동안은 참가할 수 있고, 친구는 초대한 사람이 돌아올 때까지 연결을 기다립니다. 초대한 사람이 호스트가 됩니다.
 - **한 판 더**: 대전이 끝난 뒤 두 사람이 모두 '한 판 더'를 누르면, 이미 열린 P2P 연결에서 호스트가 새 시드로 다음 판을 시작합니다. 서버를 다시 거치지 않습니다. 한쪽이 나가면 다른 쪽에 알립니다.
 - **동기화** (`src/lib/netplay.ts`): 게스트는 입력만 보내고 자기 조작은 즉시 화면에 반영합니다. 호스트가 보내는 확정 입력 스트림으로 보정하며, 승패는 호스트 확정 결과로만 표시합니다. 호스트 응답이 2초 이상 늦으면 게스트 화면이 멈추고, 10초 동안 아무 메시지가 없으면 대전을 종료합니다. 호스트가 탭을 벗어나면 대전이 그 자리에서 일시정지되고, 돌아와도 놓친 시간을 한꺼번에 진행하지 않습니다. 게스트는 호스트 프레임이 10초간 끊기면 대전을 종료합니다. 숨겨진 탭도 ping에는 응답하므로 ping만으로는 판단하지 않습니다. 게스트가 탭을 벗어나 있는 동안에도 호스트에서는 게스트 보드가 계속 진행됩니다.
-- **한계**: 친선전 전용이라 기록이나 레이팅을 저장하지 않습니다. 판정이 호스트 기기에서 이뤄지므로 조작된 클라이언트를 막을 수 없습니다. 게스트에게는 네트워크 지연만큼 불리합니다. 연결은 공개 STUN만 쓰고 TURN 중계가 없어서, 일부 엄격한 네트워크(일부 모바일 통신망 등)에서는 연결이 실패할 수 있습니다.
+- **한계**: 친선전 전용이라 기록이나 레이팅을 저장하지 않습니다. 판정이 호스트 기기에서 이뤄지므로 조작된 클라이언트를 막을 수 없습니다. 게스트에게는 네트워크 지연만큼 불리합니다. TURN 키가 없거나 발급에 실패하면 공개 STUN만으로 연결하며, 이때 일부 엄격한 네트워크(일부 모바일 통신망 등)에서는 연결이 실패할 수 있습니다.
+- **TURN 중계** (`/api/versus/ice`): 매치 참가자에게만 Cloudflare Realtime TURN의 2시간짜리 자격증명을 발급합니다. 키는 서버에만 둡니다(`CLOUDFLARE_TURN_KEY_ID`, `CLOUDFLARE_TURN_API_TOKEN`, Production 전용). 브라우저가 막는 53번 포트 주소는 뺍니다. 무료 사용량은 월 1,000GB이고 중계된 연결만 과금 대상입니다. 대전 데이터는 입력과 확정 프레임뿐이라 한 판에 수 MB를 넘지 않습니다. 키가 유출되면 Cloudflare 대시보드에서 키를 지우고 새로 만듭니다.
 - **매칭 저장소**: `supabase/migrations/202611020001_versus_matchmaking.sql`과 친구 초대용 `202611240001_versus_invites.sql`을 적용하면 Supabase를 씁니다. 이때 필요한 것은 `NEXT_PUBLIC_SUPABASE_URL`과 `SUPABASE_SERVICE_ROLE_KEY`뿐이고, 카카오 설정은 필요 없습니다. Supabase가 없으면 로컬 개발용 메모리 저장소를 쓰는데, 프로세스 하나에서만 동작하므로 Vercel에서는 503을 반환합니다. 플레이어는 익명 `puyo_guest` 쿠키로 구분합니다.
 
 ## Supabase와 카카오 로그인
@@ -74,8 +75,8 @@ http://localhost:3000 에서 실행됩니다. 환경변수가 없어도 게임�
 3. **웹 스트림의 Enhanced Measurement(향상된 측정)는 끕니다.** 앱이 직접 `page_view`와 필요한 이벤트만 보내므로 자동 URL/history 측정 및 중복 이벤트를 피합니다. `page_view`에는 쿼리스트링 없는 URL만 전달합니다.
 4. 사용자 동의 후에만 스크립트를 로드합니다. 거절하면 GA 네트워크 요청을 만들지 않습니다. 광고 관련 동의와 Google Signals는 비활성화했습니다.
 5. 이벤트: `page_view`, `game_start`, `game_end`, `login_click`, `login`, `score_submit`, `leaderboard_view`. 점수, 연쇄, 게임 시간, 모드 등만 보내며 계정 ID/이메일/별명을 보내지 않습니다.
-   - 1:1 대전: `versus_search`, `versus_invite`(`action`: create/share/copy/join), `versus_rematch`(새 판 시작, 호스트에서 기록), `versus_start`(`role`: host/guest, `mode`: random/invite), `versus_end`(`outcome`: win/loss/draw, `role`, `score`, `max_chain`, `duration`초, `rtt_ms`), `versus_error`(`reason`, `phase`, `role`). 매치 ID, 시드, 초대 코드, 상대 정보는 보내지 않습니다.
-   - `versus_error`의 `reason`: `matchmaking`(매칭 서버 오류), `signaling`(연결 정보 교환 실패), `peer_unreachable`(STUN으로 직접 연결 경로를 찾지 못함), `opponent_left`, `disconnected`, `timeout`. `versus_start`는 연결이 성공한 뒤에 보내므로, 연결 실패율은 `peer_unreachable` ÷ (`versus_start` + `peer_unreachable`)로 봅니다. 이 비율이 높으면 TURN 중계 도입을 검토합니다.
+   - 1:1 대전: `versus_search`, `versus_invite`(`action`: create/share/copy/join), `versus_rematch`(새 판 시작, 호스트에서 기록), `versus_start`(`role`: host/guest, `mode`: random/invite, `route`: direct/relay), `versus_end`(`outcome`: win/loss/draw, `role`, `score`, `max_chain`, `duration`초, `rtt_ms`), `versus_error`(`reason`, `phase`, `role`). 매치 ID, 시드, 초대 코드, 상대 정보는 보내지 않습니다.
+   - `versus_error`의 `reason`: `matchmaking`(매칭 서버 오류), `signaling`(연결 정보 교환 실패), `peer_unreachable`(중계를 포함해 연결 경로를 찾지 못함), `opponent_left`, `disconnected`, `timeout`. `versus_start`는 연결이 성공한 뒤에 보내므로, 연결 실패율은 `peer_unreachable` ÷ (`versus_start` + `peer_unreachable`)로 봅니다. 중계 사용 비율은 `versus_start`의 `route`로 봅니다.
 6. 동의한 실제 브라우저에서 게임 종료 및 기록 저장 후 GA Realtime에서 확인합니다. DebugView는 Tag Assistant 등으로 디버그 모드를 켜고 확인할 수 있습니다.
 
 현재 페이지는 일반 문서 이동 방식으로 렌더링됩니다. 추후 클라이언트 라우팅을 추가하면 route 변경에 대한 page_view를 추가해야 합니다.

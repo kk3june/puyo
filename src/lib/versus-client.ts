@@ -1,17 +1,17 @@
 // Browser side of matchmaking and the WebRTC connection. The server only pairs
 // players and relays one offer and one answer; gameplay then flows directly
-// between the two browsers over a data channel.
+// between the two browsers over a data channel (relayed by TURN only when no
+// direct route exists).
+import { STUN_SERVERS } from './turn';
 export type Role = 'host' | 'guest';
 export type Matched = { matchId: string; role: Role; seed: number };
 type Entry = { id: string; status: 'waiting' | 'matched'; matchId: string | null; role: Role | null; seed: number | null };
 
-// Public STUN only: no relay (TURN), so a few strict networks cannot connect.
-export const ICE_SERVERS: RTCIceServer[] = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }];
 const POLL_MS = 1000;
 const SIGNAL_POLL_MS = 600;
 const GATHER_MS = 3000;
 const OPEN_MS = 15_000;
-/** ICE found no working route between the peers (no TURN relay to fall back on). */
+/** ICE found no working route between the peers, not even through the relay. */
 export class PeerUnreachable extends Error {}
 
 const wait = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
@@ -95,8 +95,27 @@ function gathered(peer: RTCPeerConnection) {
   });
 }
 
+/** STUN plus short-lived TURN credentials; plain STUN if the server has none to give. */
+async function iceServers(matchId: string, signal: AbortSignal) {
+  try { return (await request<{ iceServers: RTCIceServer[] }>(`/api/versus/ice?matchId=${matchId}`, {}, signal)).iceServers; }
+  catch (error) { if (signal.aborted) throw error; return STUN_SERVERS; }
+}
+
+export type Route = 'direct' | 'relay';
+/** Whether the connected candidate pair goes through the TURN relay. */
+async function routeOf(peer: RTCPeerConnection): Promise<Route> {
+  try {
+    const stats = await peer.getStats();
+    let pair: { localCandidateId?: string; remoteCandidateId?: string } | undefined;
+    stats.forEach(report => { if (report.type === 'transport' && report.selectedCandidatePairId) pair = stats.get(report.selectedCandidatePairId); });
+    stats.forEach(report => { if (!pair && report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) pair = report; });
+    if (!pair) return 'direct';
+    return [pair.localCandidateId, pair.remoteCandidateId].some(id => id && stats.get(id)?.candidateType === 'relay') ? 'relay' : 'direct';
+  } catch { return 'direct'; }
+}
+
 export async function connectPeer({ matchId, role }: Matched, signal: AbortSignal) {
-  const peer = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  const peer = new RTCPeerConnection({ iceServers: await iceServers(matchId, signal) });
   const relay = signaling(matchId, signal);
   const abort = () => peer.close();
   signal.addEventListener('abort', abort, { once: true });
@@ -118,13 +137,13 @@ export async function connectPeer({ matchId, role }: Matched, signal: AbortSigna
     }
     if (channel.readyState !== 'open') {
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new PeerUnreachable('상대와 직접 연결하지 못했어요. 네트워크를 바꾸거나 다시 시도해 주세요.')), OPEN_MS);
+        const timer = setTimeout(() => reject(new PeerUnreachable('상대와 연결하지 못했어요. 네트워크를 바꾸거나 다시 시도해 주세요.')), OPEN_MS);
         channel.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
         signal.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
       });
     }
     signal.removeEventListener('abort', abort);
-    return { peer, channel };
+    return { peer, channel, route: await routeOf(peer) };
   } catch (error) {
     peer.close();
     throw error;

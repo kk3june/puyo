@@ -40,6 +40,8 @@ test('two players are matched, connect peer-to-peer, and agree on the winner', a
   expect(mine.find(event => event.name === 'versus_end')).toMatchObject({ outcome: 'loss' });
   expect(theirs.find(event => event.name === 'versus_end')).toMatchObject({ outcome: 'win' });
   expect(new Set([...mine, ...theirs].filter(event => event.name === 'versus_start').map(event => (event as { role?: string }).role))).toEqual(new Set(['host', 'guest']));
+  // Two local browsers always find a direct route; the dev server has no TURN key.
+  expect([...mine, ...theirs].filter(event => event.name === 'versus_start').map(event => (event as { route?: string }).route)).toEqual(['direct', 'direct']);
   expect(JSON.stringify([mine, theirs])).not.toMatch(/matchId|puyo_guest|seed/);
   await Promise.all(contexts.map(context => context.close()));
 });
@@ -130,4 +132,10 @@ test('versus fits a phone screen', async ({ page }) => {
   await page.goto('/versus');
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   await expect(page.getByRole('button', { name: '상대 찾기' })).toBeVisible();
+});
+
+test('relay credentials are only issued to match players', async ({ request }) => {
+  const outsider = await request.get('/api/versus/ice?matchId=00000000-0000-4000-8000-000000000000');
+  expect(outsider.status()).toBe(403);
+  expect((await request.get('/api/versus/ice?matchId=nope')).status()).toBe(400);
 });

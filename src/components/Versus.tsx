@@ -4,7 +4,7 @@ import { TICK_MS, type Action } from '@/lib/game';
 import { GameRenderer, presentation } from '@/lib/game-renderer';
 import { catchUp, GuestSession, HostSession, parseMessage, showsProgress, type NetMessage } from '@/lib/netplay';
 import { track } from '@/lib/analytics';
-import { connectPeer, createInvite, findMatch, joinInvite, PeerUnreachable, type Matched, type Role } from '@/lib/versus-client';
+import { connectPeer, createInvite, findMatch, joinInvite, PeerUnreachable, type Matched, type Role, type Route } from '@/lib/versus-client';
 import { INVITE_PATTERN, inviteUrl } from '@/lib/versus-invite';
 import { createMatch, pendingGarbage, type Side, type VersusMatch } from '@/lib/versus';
 import { useGameControls } from './useGameControls';
@@ -54,6 +54,7 @@ export default function Versus() {
   const rematchRef = useRef<Rematch>(NO_REMATCH);
   const [phase, setPhaseState] = useState<Phase>('idle');
   const [kind, setKind] = useState<Kind>('random');
+  const [route, setRoute] = useState<Route>('direct');
   const [error, setError] = useState('');
   const [countdown, setCountdown] = useState(3);
   const [status, setStatus] = useState<Status>(() => ({ view: createMatch(2026), rtt: 0, stalled: false }));
@@ -127,7 +128,8 @@ export default function Versus() {
       const connection = await connectPeer(matched, controller.signal);
       peer.current = connection.peer; channel.current = connection.channel;
       send.current = message => { if (connection.channel.readyState === 'open') connection.channel.send(JSON.stringify(message)); };
-      track('versus_start', { role: matched.role, mode: nextKind });
+      setRoute(connection.route);
+      track('versus_start', { role: matched.role, mode: nextKind, route: connection.route });
       lastHeard.current = performance.now();
       const mySide = matched.role === 'host' ? 0 : 1;
       connection.channel.addEventListener('message', event => {
@@ -290,7 +292,7 @@ export default function Versus() {
           </aside>
         </div>
         <div className="touch-controls" aria-label="게임 조작"><div className="pad move-pad"><button {...press('left')} aria-label="왼쪽 이동">←</button><button {...press('down')} aria-label="아래로 이동">↓</button><button {...press('right')} aria-label="오른쪽 이동">→</button></div><div className="pad action-pad"><button {...press('drop')} className="drop" aria-label="바로 놓기">바로<br/>놓기</button><button {...press('rotate')} className="rotate" aria-label="회전">↻</button></div></div>
-        <div className="game-footer"><span className="touch-hint">보드를 밀어 이동 · 탭 회전 · 아래로 튕겨 바로 놓기</span><span className="key-hint"><kbd>←</kbd><kbd>→</kbd> 이동 <kbd>↑</kbd> 회전 <kbd>↓</kbd> 빠르게 <kbd>SPACE</kbd> 바로 놓기</span><span className="connection-dot">P2P 직접 연결</span></div>
+        <div className="game-footer"><span className="touch-hint">보드를 밀어 이동 · 탭 회전 · 아래로 튕겨 바로 놓기</span><span className="key-hint"><kbd>←</kbd><kbd>→</kbd> 이동 <kbd>↑</kbd> 회전 <kbd>↓</kbd> 빠르게 <kbd>SPACE</kbd> 바로 놓기</span><span className="connection-dot">{route === 'relay' ? 'P2P 중계 연결' : 'P2P 직접 연결'}</span></div>
       </section>
     </main>
   </div>;
