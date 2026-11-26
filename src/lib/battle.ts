@@ -4,7 +4,17 @@ export const MARGIN_STEP_SECONDS = 16;
 export const ALL_CLEAR_BONUS_POINTS = 2100;
 export const MAX_GARBAGE_DROP = 30;
 
-export type Team = 0 | 1;
+export const MAX_BATTLE_PLAYERS = 6;
+
+/** Team index; free-for-all gives every player a team of their own. */
+export type Team = number;
+
+/**
+ * Where a player's attacks go. `cycle` sends each attack to the next living
+ * opponent in seat order; `focus` sends everything to one chosen opponent and
+ * falls back to cycling once that opponent is eliminated.
+ */
+export type Targeting = { mode: 'cycle' } | { mode: 'focus'; target: string };
 
 export type BattlePlayer = {
   id: string;
@@ -13,6 +23,9 @@ export type BattlePlayer = {
   attackRemainder: number;
   allClearPending: boolean;
   eliminated: boolean;
+  targeting: Targeting;
+  /** Seat index of the last cycled recipient; starts at the player's own seat. */
+  cursor: number;
 };
 
 export type BattleState = {
@@ -34,19 +47,23 @@ function assertNonNegativeInteger(value: number, name: string) {
 }
 
 export function createBattle(players: ReadonlyArray<{ id: string; team: Team }>): BattleState {
-  if (players.length < 2 || new Set(players.map(player => player.id)).size !== players.length) {
-    throw new Error('Battle players must have unique ids');
+  if (players.length < 2 || players.length > MAX_BATTLE_PLAYERS || new Set(players.map(player => player.id)).size !== players.length) {
+    throw new Error('Battle needs 2-6 players with unique ids');
   }
-  if (!players.some(player => player.team === 0) || !players.some(player => player.team === 1)) {
-    throw new Error('Battle requires both teams');
+  if (!players.every(player => Number.isInteger(player.team) && player.team >= 0 && player.team < MAX_BATTLE_PLAYERS)) {
+    throw new Error('Invalid battle team');
   }
+  if (new Set(players.map(player => player.team)).size < 2) throw new Error('Battle requires at least two teams');
   return {
-    players: players.map(player => ({
-      ...player,
+    players: players.map((player, seat) => ({
+      id: player.id,
+      team: player.team,
       pendingGarbage: 0,
       attackRemainder: 0,
       allClearPending: false,
       eliminated: false,
+      targeting: { mode: 'cycle' },
+      cursor: seat,
     })),
   };
 }
@@ -94,11 +111,41 @@ function player(state: BattleState, id: string) {
   return found;
 }
 
+const opponents = (state: BattleState, attacker: BattlePlayer) =>
+  state.players.filter(candidate => !candidate.eliminated && candidate.team !== attacker.team);
+
+/** Seat of the opponent the player's next attack goes to, or null if none is left. */
+export function nextTarget(state: BattleState, attackerId: string) {
+  const attacker = player(state, attackerId);
+  const living = opponents(state, attacker);
+  if (!living.length) return null;
+  const { targeting } = attacker;
+  if (targeting.mode === 'focus') {
+    const focused = living.find(candidate => candidate.id === targeting.target);
+    if (focused) return state.players.indexOf(focused);
+  }
+  const seats = living.map(candidate => state.players.indexOf(candidate));
+  return seats.find(seat => seat > attacker.cursor) ?? seats[0];
+}
+
+/**
+ * Chooses how the player's attacks are aimed: a living opponent's id to focus
+ * on, or null to cycle. Returns false (and changes nothing) for anyone else.
+ */
+export function setTargeting(state: BattleState, playerId: string, targetId: string | null) {
+  const attacker = player(state, playerId);
+  if (attacker.eliminated) return false;
+  if (targetId === null) { attacker.targeting = { mode: 'cycle' }; return true; }
+  if (!opponents(state, attacker).some(candidate => candidate.id === targetId)) return false;
+  attacker.targeting = { mode: 'focus', target: targetId };
+  return true;
+}
+
 /**
  * Applies one completed attack event.
  *
- * The attacker neutralizes only their own queue. Any surplus is copied in
- * full to every living opponent; it is not divided between the opponents.
+ * The attacker neutralizes only their own queue. Any surplus goes whole to a
+ * single living opponent chosen by the attacker's targeting.
  */
 export function applyAttack(
   state: BattleState,
@@ -120,10 +167,10 @@ export function applyAttack(
   const offset = Math.min(converted.garbage, attacker.pendingGarbage);
   attacker.pendingGarbage -= offset;
   const sent = converted.garbage - offset;
-  const recipients = sent === 0
-    ? []
-    : state.players.filter(candidate => !candidate.eliminated && candidate.team !== attacker.team);
+  const seat = sent === 0 ? null : nextTarget(state, attackerId);
+  const recipients = seat === null ? [] : [state.players[seat]];
   for (const recipient of recipients) recipient.pendingGarbage += sent;
+  if (seat !== null && attacker.targeting.mode === 'cycle') attacker.cursor = seat;
 
   return {
     attackerId,
@@ -144,9 +191,18 @@ export function takeGarbageDrop(state: BattleState, playerId: string) {
   return dropped;
 }
 
+/** Teams that still have a living player. */
+export function livingTeams(state: BattleState) {
+  return [...new Set(state.players.filter(candidate => !candidate.eliminated).map(candidate => candidate.team))];
+}
+
+/** Marks a player out; anyone focusing on them goes back to cycling. Returns the winning team, if decided. */
 export function eliminatePlayer(state: BattleState, playerId: string) {
   const target = player(state, playerId);
   target.eliminated = true;
-  const livingTeams = new Set(state.players.filter(candidate => !candidate.eliminated).map(candidate => candidate.team));
-  return livingTeams.size === 1 ? [...livingTeams][0] : null;
+  for (const other of state.players) {
+    if (other.targeting.mode === 'focus' && other.targeting.target === playerId) other.targeting = { mode: 'cycle' };
+  }
+  const teams = livingTeams(state);
+  return teams.length === 1 ? teams[0] : null;
 }

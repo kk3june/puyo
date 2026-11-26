@@ -6,7 +6,7 @@ import { catchUp, GuestSession, HostSession, parseMessage, showsProgress, type N
 import { track } from '@/lib/analytics';
 import { connectPeer, createInvite, findMatch, joinInvite, PeerUnreachable, type Matched, type Role, type Route } from '@/lib/versus-client';
 import { INVITE_PATTERN, inviteUrl } from '@/lib/versus-invite';
-import { createMatch, pendingGarbage, type Side, type VersusMatch } from '@/lib/versus';
+import { createMatch, pendingGarbage, teamOf, type Side, type VersusMatch } from '@/lib/versus';
 import { useGameControls } from './useGameControls';
 import { ControlModeToggle, useControlMode, usePlayViewport } from './ControlMode';
 
@@ -231,7 +231,7 @@ export default function Versus() {
       }
       if (view.ended && painters.every(painter => painter.remaining(now) === 0)) {
         const own = view.games[current.side];
-        track('versus_end', { outcome: view.winner === null ? 'draw' : view.winner === current.side ? 'win' : 'loss', role: roleOf(current.side),
+        track('versus_end', { outcome: view.winner === null ? 'draw' : view.winner === teamOf(view, current.side) ? 'win' : 'loss', role: roleOf(current.side),
           max_chain: own.maxChain, score: own.score, duration: Math.round(view.tick * TICK_MS / 1000), rtt_ms: Math.round(current.rtt) });
         setPhase('done'); return;
       }
@@ -252,7 +252,7 @@ export default function Versus() {
 
   const view = status.view;
   const me = presentation(view.games[side]), them = presentation(view.games[other]);
-  const outcome = view.winner === null ? '무승부' : view.winner === side ? '승리!' : '패배';
+  const outcome = view.winner === null ? '무승부' : view.winner === teamOf(view, side) ? '승리!' : '패배';
   const busy = phase === 'searching' || phase === 'connecting';
   return <div className="site-shell versus-shell">
     <header className="header"><a className="logo" href="/" aria-label="PUYO ROOM 홈"><span className="logo-mark"><Blob color={2} tiny /></span>puyo<span>room</span><span className="logo-dot">✦</span></a>
